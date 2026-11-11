@@ -1,6 +1,6 @@
 """
 build_gallery.py - Generate Interactive Resale Batch Inspector & WYSIWYG Editor HTML
-Optimized for desktop and mobile phone browsers over local Wi-Fi.
+Optimized for desktop and mobile phone browsers over local Wi-Fi with Dark Mode by default.
 
 Outputs:
   - items/batch_gallery.html
@@ -67,9 +67,9 @@ def build_gallery() -> None:
             try:
                 with Image.open(pf) as raw_img:
                     img = ImageOps.exif_transpose(raw_img)
-                    img.thumbnail((640, 640), Image.Resampling.LANCZOS)
+                    img.thumbnail((720, 720), Image.Resampling.LANCZOS)
                     buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=62, optimize=True)
+                    img.save(buf, format="JPEG", quality=68, optimize=True)
                     b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
                     b64_photos.append({
                         "filename": pf.name,
@@ -81,16 +81,16 @@ def build_gallery() -> None:
         route = item.get("routing_bucket", "LOCAL_ONLY")
         if route == "ALL_THREE":
             badge_label = "eBay + FBMP + Craigslist"
-            badge_style = "bg-emerald-500/15 text-emerald-500 border-emerald-500/30"
+            badge_style = "bg-emerald-500/15 text-emerald-400 border-emerald-500/30"
         elif route == "EBAY_ONLY":
             badge_label = "eBay Only"
-            badge_style = "bg-blue-500/15 text-blue-500 border-blue-500/30"
+            badge_style = "bg-blue-500/15 text-blue-400 border-blue-500/30"
         elif route == "LOCAL_ONLY":
             badge_label = "Local Only (FBMP + CL)"
-            badge_style = "bg-amber-500/15 text-amber-500 border-amber-500/30"
+            badge_style = "bg-amber-500/15 text-amber-400 border-amber-500/30"
         else:
             badge_label = "Donate / Lot"
-            badge_style = "bg-purple-500/15 text-purple-500 border-purple-500/30"
+            badge_style = "bg-purple-500/15 text-purple-400 border-purple-500/30"
 
         ship_info = item.get("shipping", {})
         zone8_cost = ship_info.get("zone8_cost_usd", 0.0)
@@ -129,41 +129,82 @@ def build_gallery() -> None:
     json_str = json.dumps(processed_inventory)
 
     html_template = f"""<!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>Resale Inventory Master Inspector & Mobile Editor</title>
   <script src="https://www.gstatic.com/antigravity/web/dev/tailwindcss.min.js"></script>
   <style>
+    :root {{
+      --background: #0b0f19;
+      --card: #111827;
+      --card-muted: #162032;
+      --foreground: #f3f4f6;
+      --muted-foreground: #9ca3af;
+      --border: #1f2937;
+      --border-focus: #3b82f6;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --primary-foreground: #ffffff;
+      --input-bg: #090d16;
+      color-scheme: dark;
+    }}
+
+    body {{
+      background-color: var(--background);
+      color: var(--foreground);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      color-scheme: dark;
+    }}
+
     /* Smooth touch scrolling */
     .touch-scroll {{ -webkit-overflow-scrolling: touch; }}
+
+    /* Dark Mode Scrollbars */
+    ::-webkit-scrollbar {{
+      width: 6px;
+      height: 6px;
+    }}
+    ::-webkit-scrollbar-track {{
+      background: #0b0f19;
+    }}
+    ::-webkit-scrollbar-thumb {{
+      background: #1f2937;
+      border-radius: 4px;
+    }}
+    ::-webkit-scrollbar-thumb:hover {{
+      background: #374151;
+    }}
   </style>
 </head>
-<body class="bg-transparent text-[var(--foreground)] antialiased p-2 sm:p-4 font-sans pb-24 lg:pb-6">
-  <div class="bg-[var(--card)] border border-[var(--border)] rounded-2xl p-3.5 sm:p-5 shadow-lg max-w-6xl mx-auto flex flex-col gap-3.5 sm:gap-4">
+<body class="bg-[#0b0f19] text-[#f3f4f6] antialiased p-2 sm:p-4 font-sans pb-24 lg:pb-6 min-h-screen">
+  <div class="bg-[#111827] border border-[#1f2937] rounded-2xl p-3.5 sm:p-5 shadow-2xl max-w-6xl mx-auto flex flex-col gap-3.5 sm:gap-4">
     
     <!-- Top Header -->
-    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-[var(--border)]">
+    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-[#1f2937]">
       <div>
         <div class="flex items-center gap-2 flex-wrap">
-          <h2 class="text-lg sm:text-xl font-bold text-[var(--foreground)] tracking-tight">Resale Inventory Master Inspector</h2>
-          <span class="text-xs font-semibold bg-emerald-500/15 text-emerald-500 px-2.5 py-0.5 rounded-full border border-emerald-500/25">{len(processed_inventory)} Items</span>
-          <span class="text-xs font-semibold bg-blue-500/15 text-blue-500 px-2.5 py-0.5 rounded-full border border-blue-500/25">{sum(len(x['photos']) for x in processed_inventory)} Photos</span>
+          <h2 class="text-lg sm:text-xl font-bold text-white tracking-tight">Resale Inventory Master Inspector</h2>
+          <span class="text-xs font-semibold bg-emerald-500/15 text-emerald-400 px-2.5 py-0.5 rounded-full border border-emerald-500/30">{len(processed_inventory)} Items</span>
+          <span class="text-xs font-semibold bg-blue-500/15 text-blue-400 px-2.5 py-0.5 rounded-full border border-blue-500/30">{sum(len(x['photos']) for x in processed_inventory)} Photos</span>
+          <span class="text-[11px] font-medium bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">Dark Mode</span>
         </div>
-        <p class="text-xs text-[var(--muted-foreground)] mt-0.5">Edit titles, prices, conditions, and copy live on desktop or your phone.</p>
+        <p class="text-xs text-slate-400 mt-0.5">Edit titles, prices, conditions, and copy live on desktop or your phone.</p>
       </div>
       
       <!-- Connection Status & Phone Info -->
       <div class="flex items-center gap-2 text-xs self-start sm:self-auto flex-wrap">
-        <div id="server-status-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors">
+        <div id="server-status-pill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium transition-colors bg-slate-800/80 border-slate-700 text-slate-300">
           <span id="server-dot" class="inline-block w-2 h-2 rounded-full bg-slate-400"></span>
           <span id="server-status-text">Checking server...</span>
         </div>
-        <div id="phone-pill" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[var(--background)] border border-[var(--border)] text-xs text-[var(--foreground)] font-mono">
-          <span>📱</span>
+        <div id="phone-pill" class="hidden items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#090d16] border border-[#1f2937] text-xs text-slate-200 font-mono">
+          <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
           <span id="phone-url-text" class="truncate max-w-[170px]"></span>
-          <button id="copy-phone-url-btn" class="hover:text-emerald-500 transition-colors text-[11px]" title="Copy phone URL">📋</button>
+          <button id="copy-phone-url-btn" class="hover:text-emerald-400 transition-colors text-[11px] p-0.5" title="Copy phone URL">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+          </button>
         </div>
       </div>
     </div>
@@ -172,38 +213,38 @@ def build_gallery() -> None:
     <div class="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin touch-scroll" id="item-tabs"></div>
 
     <!-- Active Item Header Card with Inline Editable Title & Price -->
-    <div class="bg-[var(--background)]/60 border border-[var(--border)] rounded-xl p-3 sm:p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4">
+    <div class="bg-[#0b0f19]/80 border border-[#1f2937] rounded-xl p-3 sm:p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 shadow-sm">
       <div class="flex-1 w-full">
         <div class="flex items-center gap-2 flex-wrap mb-1">
-          <span id="item-num-badge" class="text-xs font-bold px-2 py-0.5 rounded bg-[var(--primary)] text-[var(--primary-foreground)] font-mono">Item 01</span>
-          <span id="item-sku" class="text-xs font-mono text-[var(--muted-foreground)]">ITEM-20261110-01</span>
+          <span id="item-num-badge" class="text-xs font-bold px-2 py-0.5 rounded bg-blue-600 text-white font-mono">Item 01</span>
+          <span id="item-sku" class="text-xs font-mono text-slate-400">ITEM-20261110-01</span>
           <span id="item-route-badge" class="text-xs px-2.5 py-0.5 rounded-full border font-semibold"></span>
         </div>
         
         <!-- Editable Title Field -->
         <div class="relative w-full">
-          <input id="edit-title" type="text" class="w-full text-sm sm:text-base font-bold text-[var(--foreground)] bg-transparent border-b border-transparent hover:border-[var(--border)] focus:border-[var(--primary)] focus:bg-[var(--card)] focus:ring-1 focus:ring-[var(--primary)] rounded px-1.5 py-1 transition-all outline-none" placeholder="Item Title..." />
+          <input id="edit-title" type="text" class="w-full text-sm sm:text-base font-bold text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 focus:bg-[#111827] focus:ring-1 focus:ring-blue-500 rounded px-1.5 py-1 transition-all outline-none" placeholder="Item Title..." />
         </div>
-        <p id="item-route-reason" class="text-[11px] sm:text-xs text-[var(--muted-foreground)] mt-0.5 px-1.5 italic"></p>
+        <p id="item-route-reason" class="text-[11px] sm:text-xs text-slate-400 mt-0.5 px-1.5 italic"></p>
       </div>
       
       <!-- Economic Quick Stats -->
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full lg:w-auto shrink-0 border-t lg:border-t-0 pt-2.5 lg:pt-0 border-[var(--border)]">
-        <div class="bg-[var(--card)] border border-[var(--border)] p-1.5 sm:p-2 rounded-lg text-center">
-          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-[var(--muted-foreground)]">Target Comp ($)</div>
-          <input id="edit-comp-price" type="number" step="0.5" class="w-20 text-sm font-bold text-center text-[var(--foreground)] bg-transparent border-b border-transparent hover:border-[var(--border)] focus:border-[var(--primary)] outline-none" />
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 w-full lg:w-auto shrink-0 border-t lg:border-t-0 pt-2.5 lg:pt-0 border-[#1f2937]">
+        <div class="bg-[#111827] border border-[#1f2937] p-1.5 sm:p-2 rounded-lg text-center shadow-inner">
+          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">Target Comp ($)</div>
+          <input id="edit-comp-price" type="number" step="0.5" class="w-20 text-sm font-bold text-center text-white bg-transparent border-b border-transparent hover:border-slate-700 focus:border-blue-500 outline-none" />
         </div>
-        <div class="bg-[var(--card)] border border-[var(--border)] p-1.5 sm:p-2 rounded-lg text-center">
-          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-[var(--muted-foreground)]">FBMP Ask</div>
-          <div id="stat-fbmp" class="text-sm font-bold text-amber-500"></div>
+        <div class="bg-[#111827] border border-[#1f2937] p-1.5 sm:p-2 rounded-lg text-center shadow-inner">
+          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">FBMP Ask</div>
+          <div id="stat-fbmp" class="text-sm font-bold text-amber-400"></div>
         </div>
-        <div class="bg-[var(--card)] border border-[var(--border)] p-1.5 sm:p-2 rounded-lg text-center">
-          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-[var(--muted-foreground)]">Zone 8 Ship</div>
-          <div id="stat-ship" class="text-xs sm:text-sm font-medium text-[var(--muted-foreground)]"></div>
+        <div class="bg-[#111827] border border-[#1f2937] p-1.5 sm:p-2 rounded-lg text-center shadow-inner">
+          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">Zone 8 Ship</div>
+          <div id="stat-ship" class="text-xs sm:text-sm font-medium text-slate-300"></div>
         </div>
-        <div class="bg-[var(--card)] border border-[var(--border)] p-1.5 sm:p-2 rounded-lg text-center">
-          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-[var(--muted-foreground)]">Est. Net Profit</div>
-          <div id="stat-net" class="text-sm font-bold text-emerald-500"></div>
+        <div class="bg-[#111827] border border-[#1f2937] p-1.5 sm:p-2 rounded-lg text-center shadow-inner">
+          <div class="text-[9px] sm:text-[10px] uppercase tracking-wider text-slate-400 font-medium">Est. Net Profit</div>
+          <div id="stat-net" class="text-sm font-bold text-emerald-400"></div>
         </div>
       </div>
     </div>
@@ -213,23 +254,25 @@ def build_gallery() -> None:
       
       <!-- Photo Stage (Left 7 Cols) -->
       <div class="lg:col-span-7 flex flex-col gap-2">
-        <div class="relative bg-black/90 rounded-xl overflow-hidden border border-[var(--border)] flex items-center justify-center min-h-[300px] sm:min-h-[380px] max-h-[480px] group shadow-inner">
-          <img id="main-photo" src="" alt="Main Photo" class="w-full h-auto max-h-[480px] object-contain transition-transform duration-200" />
+        <div class="relative bg-black rounded-xl overflow-hidden border border-[#1f2937] flex items-center justify-center min-h-[300px] sm:min-h-[380px] max-h-[480px] group shadow-inner">
+          <img id="main-photo" src="" alt="Main Photo" class="w-full h-auto max-h-[480px] object-contain transition-transform duration-200 cursor-zoom-in" title="Click to view full screen" />
           
           <!-- Prev / Next Overlays -->
-          <button id="prev-btn" class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-2.5 sm:p-3 border border-white/20 transition-all opacity-85 hover:opacity-100 active:scale-95">
+          <button id="prev-btn" class="absolute left-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-2.5 sm:p-3 border border-white/20 transition-all opacity-85 hover:opacity-100 active:scale-95" title="Previous photo">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg>
           </button>
-          <button id="next-btn" class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-2.5 sm:p-3 border border-white/20 transition-all opacity-85 hover:opacity-100 active:scale-95">
+          <button id="next-btn" class="absolute right-2 top-1/2 -translate-y-1/2 bg-black/60 hover:bg-black/90 text-white rounded-full p-2.5 sm:p-3 border border-white/20 transition-all opacity-85 hover:opacity-100 active:scale-95" title="Next photo">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
           </button>
 
           <!-- Top-right Quick Rotate Controls -->
           <div class="absolute top-2.5 right-2.5 flex gap-1.5 opacity-90 hover:opacity-100 transition-opacity">
-            <button id="rotate-left-btn" title="Rotate Left 90°" class="bg-black/75 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+            <button id="rotate-left-btn" title="Rotate Left 90°" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2m0 0l-3-3m3 3l3-3M3 10l3-3m-3 3l3 3"></path></svg>
               <span>↺</span>
             </button>
-            <button id="rotate-right-btn" title="Rotate Right 90° (Shortcut: R)" class="bg-black/75 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+            <button id="rotate-right-btn" title="Rotate Right 90° (Shortcut: R)" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2m0 0l3-3m-3 3l-3-3m5-6l-3-3m3 3l-3 3"></path></svg>
               <span>↻</span>
             </button>
           </div>
@@ -242,27 +285,27 @@ def build_gallery() -> None:
         </div>
 
         <!-- Thumbnail Strip below hero photo -->
-        <div class="flex gap-2 overflow-x-auto p-1.5 border border-[var(--border)] rounded-xl bg-[var(--background)]/40 scrollbar-thin touch-scroll" id="thumbs-strip"></div>
+        <div class="flex gap-2 overflow-x-auto p-1.5 border border-[#1f2937] rounded-xl bg-[#090d16]/70 scrollbar-thin touch-scroll" id="thumbs-strip"></div>
       </div>
 
       <!-- Right 5 Cols: Spec & WYSIWYG Editor Panel -->
       <div class="lg:col-span-5 flex flex-col gap-3">
         
         <!-- Specs & Condition Card (Editable Condition & Notes) -->
-        <div class="border border-[var(--border)] rounded-xl p-3 sm:p-3.5 bg-[var(--card)] flex flex-col gap-2 text-xs">
-          <div class="font-bold text-sm text-[var(--foreground)] border-b border-[var(--border)] pb-1.5 flex justify-between items-center">
+        <div class="border border-[#1f2937] rounded-xl p-3 sm:p-3.5 bg-[#111827] flex flex-col gap-2 text-xs shadow-sm">
+          <div class="font-bold text-sm text-white border-b border-[#1f2937] pb-1.5 flex justify-between items-center">
             <span>Item Specifics</span>
-            <span id="spec-category" class="text-[11px] font-normal text-[var(--muted-foreground)] truncate max-w-[180px]"></span>
+            <span id="spec-category" class="text-[11px] font-normal text-slate-400 truncate max-w-[180px]"></span>
           </div>
 
           <div class="grid grid-cols-2 gap-2 pt-0.5">
             <div>
-              <span class="text-[var(--muted-foreground)] block mb-0.5">Brand / Model:</span>
-              <strong id="spec-brand-model" class="text-[var(--foreground)] truncate block"></strong>
+              <span class="text-slate-400 block mb-0.5 font-medium">Brand / Model:</span>
+              <strong id="spec-brand-model" class="text-white truncate block"></strong>
             </div>
             <div>
-              <span class="text-[var(--muted-foreground)] block mb-0.5">Condition:</span>
-              <select id="edit-condition" class="w-full bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-1.5 py-1 text-xs font-semibold outline-none focus:border-[var(--primary)]">
+              <span class="text-slate-400 block mb-0.5 font-medium">Condition:</span>
+              <select id="edit-condition" class="w-full bg-[#090d16] text-slate-200 border border-[#1f2937] rounded px-1.5 py-1 text-xs font-semibold outline-none focus:border-blue-500">
                 <option value="New">New</option>
                 <option value="Open Box">Open Box</option>
                 <option value="Used - Like New">Used - Like New</option>
@@ -274,40 +317,59 @@ def build_gallery() -> None:
             </div>
           </div>
 
-          <div class="pt-1.5 border-t border-[var(--border)]">
-            <span class="text-[var(--muted-foreground)] block mb-1">Condition Notes:</span>
-            <input id="edit-notes" type="text" class="w-full bg-[var(--background)] text-[var(--foreground)] border border-[var(--border)] rounded px-2 py-1 text-xs outline-none focus:border-[var(--primary)]" />
+          <div class="pt-1.5 border-t border-[#1f2937]">
+            <span class="text-slate-400 block mb-1 font-medium">Condition Notes:</span>
+            <input id="edit-notes" type="text" class="w-full bg-[#090d16] text-slate-200 border border-[#1f2937] rounded px-2 py-1 text-xs outline-none focus:border-blue-500" />
           </div>
 
-          <div class="pt-1.5 border-t border-[var(--border)]">
-            <span class="text-[var(--muted-foreground)] block mb-0.5">Included Accessories:</span>
-            <ul id="spec-accessories" class="list-disc list-inside text-[var(--foreground)] space-y-0.5 max-h-[85px] overflow-y-auto"></ul>
+          <div class="pt-1.5 border-t border-[#1f2937]">
+            <span class="text-slate-400 block mb-0.5 font-medium">Included Accessories:</span>
+            <ul id="spec-accessories" class="list-disc list-inside text-slate-300 space-y-0.5 max-h-[85px] overflow-y-auto"></ul>
           </div>
         </div>
 
-        <!-- Description & WYSIWYG Editor Card -->
-        <div class="border border-[var(--border)] rounded-xl p-3 sm:p-3.5 bg-[var(--card)] flex flex-col gap-2 text-xs">
-          <div class="font-bold text-sm text-[var(--foreground)] border-b border-[var(--border)] pb-1.5 flex justify-between items-center">
-            <span>Listing Copy & Description</span>
-            <div class="flex items-center gap-1.5">
-              <button id="copy-desc-btn" class="text-[11px] px-2.5 py-1 rounded border border-[var(--border)] bg-[var(--background)] hover:bg-[var(--card)] transition-colors active:scale-95">
-                Copy
+        <!-- Description & WYSIWYG Editor Card with Edit & Preview Modes -->
+        <div class="border border-[#1f2937] rounded-xl p-3 sm:p-3.5 bg-[#111827] flex flex-col gap-2 text-xs shadow-sm">
+          <div class="font-bold text-sm text-white border-b border-[#1f2937] pb-1.5 flex justify-between items-center flex-wrap gap-2">
+            
+            <!-- Edit Mode vs Formatted Preview Toggle -->
+            <div class="flex items-center rounded-lg bg-[#090d16] p-0.5 border border-[#1f2937]">
+              <button id="mode-edit-btn" class="px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-600 text-white transition-all">
+                Edit Mode
               </button>
-              <button id="save-btn" class="text-[11px] font-semibold px-3 py-1 rounded bg-[var(--primary)] text-[var(--primary-foreground)] hover:opacity-90 transition-opacity flex items-center gap-1 shadow-sm active:scale-95">
-                <span>💾 Save</span>
+              <button id="mode-preview-btn" class="px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-white rounded-md transition-all">
+                Preview Mode
+              </button>
+            </div>
+
+            <div class="flex items-center gap-1.5">
+              <button id="copy-desc-btn" class="text-[11px] px-2.5 py-1 rounded border border-[#1f2937] bg-[#090d16] text-slate-300 hover:bg-slate-800 transition-colors active:scale-95 flex items-center gap-1">
+                <svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
+                <span>Copy</span>
+              </button>
+              <button id="save-btn" class="text-[11px] font-semibold px-3 py-1 rounded bg-blue-600 text-white hover:bg-blue-500 transition-colors flex items-center gap-1 shadow-sm active:scale-95">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                <span>Save</span>
               </button>
             </div>
           </div>
 
           <!-- Toast notification -->
-          <div id="save-toast" class="hidden px-2.5 py-1 rounded text-xs font-medium text-emerald-500 bg-emerald-500/10 border border-emerald-500/25 transition-all"></div>
+          <div id="save-toast" class="hidden px-2.5 py-1 rounded text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 transition-all"></div>
 
-          <!-- Editable Description Textarea -->
-          <textarea id="edit-description" rows="7" class="w-full bg-[var(--background)]/70 border border-[var(--border)] rounded-lg p-2.5 font-sans leading-relaxed text-[var(--foreground)] text-xs resize-y outline-none focus:border-[var(--primary)] focus:ring-1 focus:ring-[var(--primary)] transition-all" placeholder="Enter listing description..."></textarea>
+          <!-- Edit Mode: Textarea -->
+          <div id="edit-pane" class="w-full">
+            <textarea id="edit-description" rows="8" class="w-full bg-[#090d16] border border-[#1f2937] rounded-lg p-2.5 font-sans leading-relaxed text-slate-200 text-xs resize-y outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all" placeholder="Enter listing description..."></textarea>
+          </div>
+
+          <!-- Preview Mode: Formatted Render Pane -->
+          <div id="preview-pane" class="hidden w-full bg-[#090d16] border border-[#1f2937] rounded-lg p-3 font-sans text-slate-200 text-xs max-h-[220px] overflow-y-auto leading-relaxed space-y-2 select-text">
+            <div id="preview-rendered" class="whitespace-pre-line text-slate-300"></div>
+          </div>
           
-          <div class="text-[10px] text-[var(--muted-foreground)] flex justify-between items-center pt-0.5">
-            <span>Desktop: <kbd class="px-1 rounded bg-[var(--background)] border border-[var(--border)]">Ctrl+S</kbd></span>
-            <span id="char-counter">0 chars</span>
+          <div class="text-[10px] text-slate-400 flex justify-between items-center pt-0.5">
+            <span>Desktop: <kbd class="px-1 py-0.5 rounded bg-[#090d16] border border-[#1f2937] text-slate-300">Ctrl+S</kbd></span>
+            <span id="char-counter" class="font-mono">0 chars</span>
           </div>
         </div>
 
@@ -318,18 +380,36 @@ def build_gallery() -> None:
   </div>
 
   <!-- Mobile Sticky Bottom Save Bar (Visible on mobile screens) -->
-  <div class="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-[var(--card)]/95 backdrop-blur border-t border-[var(--border)] shadow-xl flex items-center justify-between gap-3 z-50">
+  <div class="lg:hidden fixed bottom-0 left-0 right-0 p-3 bg-[#111827]/95 backdrop-blur border-t border-[#1f2937] shadow-2xl flex items-center justify-between gap-3 z-50">
     <div class="flex-1 min-w-0">
-      <div id="mobile-item-title" class="text-xs font-bold text-[var(--foreground)] truncate">Item</div>
-      <div id="mobile-item-price" class="text-[11px] font-semibold text-emerald-500">$0.00</div>
+      <div id="mobile-item-title" class="text-xs font-bold text-white truncate">Item</div>
+      <div id="mobile-item-price" class="text-[11px] font-semibold text-emerald-400 font-mono">$0.00</div>
     </div>
     <div class="flex items-center gap-2">
-      <button id="mobile-copy-btn" class="px-3 py-2 text-xs font-medium rounded-lg border border-[var(--border)] bg-[var(--background)] text-[var(--foreground)] active:scale-95">
+      <button id="mobile-copy-btn" class="px-3 py-2 text-xs font-medium rounded-lg border border-[#1f2937] bg-[#090d16] text-slate-300 active:scale-95">
         Copy
       </button>
-      <button id="mobile-save-btn" class="px-4 py-2 text-xs font-bold rounded-lg bg-[var(--primary)] text-[var(--primary-foreground)] shadow-md flex items-center gap-1 active:scale-95">
-        <span>💾 Save</span>
+      <button id="mobile-save-btn" class="px-4 py-2 text-xs font-bold rounded-lg bg-blue-600 text-white shadow-md flex items-center gap-1 active:scale-95 hover:bg-blue-500">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+        <span>Save</span>
       </button>
+    </div>
+  </div>
+
+  <!-- Fullscreen Photo Modal -->
+  <div id="photo-modal" class="hidden fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col justify-between p-3 sm:p-6">
+    <div class="flex justify-between items-center text-white pb-2">
+      <span id="modal-filename" class="font-mono text-xs sm:text-sm text-slate-300">photo.jpg</span>
+      <button id="close-modal-btn" class="p-2 rounded-full bg-slate-800 hover:bg-slate-700 text-white transition-colors">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+      </button>
+    </div>
+    <div class="flex-1 flex items-center justify-center overflow-hidden">
+      <img id="modal-photo" src="" alt="Full Screen" class="max-w-full max-h-[82vh] object-contain transition-transform duration-200" />
+    </div>
+    <div class="flex justify-center gap-4 pt-2">
+      <button id="modal-prev-btn" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">Previous</button>
+      <button id="modal-next-btn" class="px-4 py-2 bg-slate-800 text-white rounded-lg text-xs font-semibold hover:bg-slate-700">Next</button>
     </div>
   </div>
 
@@ -340,6 +420,7 @@ def build_gallery() -> None:
     let currentRotation = 0;
     let isLiveServer = false;
     let serverBaseUrl = '';
+    let currentMode = 'edit'; // 'edit' or 'preview'
 
     const statusPill = document.getElementById('server-status-pill');
     const statusDot = document.getElementById('server-dot');
@@ -358,8 +439,8 @@ def build_gallery() -> None:
             if (data.status === 'ok') {{
               isLiveServer = true;
               serverBaseUrl = url;
-              statusPill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-500';
-              statusDot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse';
+              statusPill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium bg-emerald-500/10 border-emerald-500/30 text-emerald-400';
+              statusDot.className = 'inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse';
               statusText.textContent = 'Live Server Connected';
               
               if (data.phone_url) {{
@@ -368,8 +449,10 @@ def build_gallery() -> None:
                 phoneUrlText.textContent = data.phone_url;
                 copyPhoneBtn.onclick = () => {{
                   navigator.clipboard.writeText(data.phone_url).then(() => {{
-                    copyPhoneBtn.textContent = '✓';
-                    setTimeout(() => {{ copyPhoneBtn.textContent = '📋'; }}, 2000);
+                    copyPhoneBtn.innerHTML = '<span class="text-emerald-400 font-bold">✓</span>';
+                    setTimeout(() => {{ 
+                      copyPhoneBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>';
+                    }}, 2000);
                   }});
                 }};
               }}
@@ -378,8 +461,8 @@ def build_gallery() -> None:
           }}
         }} catch (e) {{}}
       }}
-      statusPill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium bg-blue-500/10 border-blue-500/30 text-blue-500';
-      statusDot.className = 'inline-block w-2 h-2 rounded-full bg-blue-500';
+      statusPill.className = 'flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-medium bg-blue-500/10 border-blue-500/30 text-blue-400';
+      statusDot.className = 'inline-block w-2 h-2 rounded-full bg-blue-400';
       statusText.textContent = 'Offline File View';
     }}
 
@@ -408,6 +491,13 @@ def build_gallery() -> None:
     const editCondition = document.getElementById('edit-condition');
     const editNotes = document.getElementById('edit-notes');
     const specAccessories = document.getElementById('spec-accessories');
+    
+    // Editor & Preview Modes
+    const modeEditBtn = document.getElementById('mode-edit-btn');
+    const modePreviewBtn = document.getElementById('mode-preview-btn');
+    const editPane = document.getElementById('edit-pane');
+    const previewPane = document.getElementById('preview-pane');
+    const previewRendered = document.getElementById('preview-rendered');
     const editDescription = document.getElementById('edit-description');
     const charCounter = document.getElementById('char-counter');
     const copyDescBtn = document.getElementById('copy-desc-btn');
@@ -420,6 +510,14 @@ def build_gallery() -> None:
     const mobileSaveBtn = document.getElementById('mobile-save-btn');
     const mobileCopyBtn = document.getElementById('mobile-copy-btn');
 
+    // Modal elements
+    const photoModal = document.getElementById('photo-modal');
+    const modalPhoto = document.getElementById('modal-photo');
+    const modalFilename = document.getElementById('modal-filename');
+    const closeModalBtn = document.getElementById('close-modal-btn');
+    const modalPrevBtn = document.getElementById('modal-prev-btn');
+    const modalNextBtn = document.getElementById('modal-next-btn');
+
     function renderTabs() {{
       tabsContainer.innerHTML = '';
       inventory.forEach((item, idx) => {{
@@ -427,8 +525,8 @@ def build_gallery() -> None:
         const isActive = idx === currentItemIdx;
         btn.className = `px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${{
           isActive 
-            ? 'bg-[var(--primary)] text-[var(--primary-foreground)] border-[var(--primary)] shadow-sm' 
-            : 'bg-[var(--card)] hover:bg-[var(--background)] text-[var(--foreground)] border-[var(--border)]'
+            ? 'bg-blue-600 text-white border-blue-500 shadow-sm' 
+            : 'bg-[#111827] hover:bg-[#1f2937] text-slate-300 border-[#1f2937]'
         }}`;
         btn.innerHTML = `<span class="opacity-80 font-mono">#${{item.num}}</span> ${{item.brand || item.title.split(' ')[0]}} <span class="text-[10px] opacity-70 ml-0.5">(${{item.photos.length}})</span>`;
         btn.onclick = () => selectItem(idx);
@@ -477,10 +575,11 @@ def build_gallery() -> None:
         specAccessories.appendChild(li);
       }});
 
-      // Description
+      // Description & Preview
       editDescription.value = item.description_detailed;
+      updatePreviewPane();
       updateCharCounter();
-      copyDescBtn.textContent = 'Copy';
+      copyDescBtn.innerHTML = '<span>Copy</span>';
       saveToast.className = 'hidden';
 
       // Thumbnails
@@ -489,7 +588,7 @@ def build_gallery() -> None:
         const t = document.createElement('div');
         const isSelected = pIdx === currentPhotoIdx;
         t.className = `w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all hover:opacity-90 active:scale-95 ${{
-          isSelected ? 'border-[var(--primary)] ring-2 ring-[var(--primary)]/30' : 'border-[var(--border)] opacity-70'
+          isSelected ? 'border-blue-500 ring-2 ring-blue-500/40 opacity-100' : 'border-[#1f2937] opacity-60 hover:opacity-100'
         }}`;
         t.innerHTML = `<img src="${{ph.data}}" alt="${{ph.filename}}" class="w-full h-full object-cover" />`;
         t.onclick = () => selectPhoto(pIdx);
@@ -504,9 +603,9 @@ def build_gallery() -> None:
       currentRotation = 0;
       Array.from(thumbsStrip.children).forEach((child, idx) => {{
         if (idx === currentPhotoIdx) {{
-          child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all hover:opacity-90 border-[var(--primary)] ring-2 ring-[var(--primary)]/30';
+          child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all border-blue-500 ring-2 ring-blue-500/40 opacity-100';
         }} else {{
-          child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all hover:opacity-90 border-[var(--border)] opacity-70';
+          child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all border-[#1f2937] opacity-60 hover:opacity-100';
         }}
       }});
       updatePhotoView();
@@ -520,6 +619,12 @@ def build_gallery() -> None:
         mainPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
         photoFilename.textContent = ph.filename;
         photoCounter.textContent = `${{currentPhotoIdx + 1}} of ${{item.photos.length}}`;
+        
+        if (!photoModal.classList.contains('hidden')) {{
+          modalPhoto.src = ph.data;
+          modalPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
+          modalFilename.textContent = ph.filename;
+        }}
       }}
     }}
 
@@ -527,7 +632,33 @@ def build_gallery() -> None:
       charCounter.textContent = `${{editDescription.value.length}} chars`;
     }}
 
-    editDescription.addEventListener('input', updateCharCounter);
+    function updatePreviewPane() {{
+      const rawText = editDescription.value || '';
+      previewRendered.textContent = rawText;
+    }}
+
+    editDescription.addEventListener('input', () => {{
+      updateCharCounter();
+      updatePreviewPane();
+    }});
+
+    // Mode Toggle
+    modeEditBtn.onclick = () => {{
+      currentMode = 'edit';
+      modeEditBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-600 text-white transition-all';
+      modePreviewBtn.className = 'px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-white rounded-md transition-all';
+      editPane.classList.remove('hidden');
+      previewPane.classList.add('hidden');
+    }};
+
+    modePreviewBtn.onclick = () => {{
+      currentMode = 'preview';
+      modePreviewBtn.className = 'px-2.5 py-1 text-xs font-semibold rounded-md bg-blue-600 text-white transition-all';
+      modeEditBtn.className = 'px-2.5 py-1 text-xs font-medium text-slate-400 hover:text-white rounded-md transition-all';
+      updatePreviewPane();
+      editPane.classList.add('hidden');
+      previewPane.classList.remove('hidden');
+    }};
 
     // Save action
     async function saveCurrentItem() {{
@@ -560,24 +691,26 @@ def build_gallery() -> None:
 
           const data = await res.json();
           if (res.ok && data.status === 'ok') {{
-            saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-emerald-500 bg-emerald-500/10 border border-emerald-500/25';
+            saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30';
             saveToast.textContent = '✓ Saved to disk & synced to LISTINGS_EDIT.md!';
             mobileSaveBtn.innerHTML = '<span>✓ Saved</span>';
-            setTimeout(() => {{ mobileSaveBtn.innerHTML = '<span>💾 Save</span>'; }}, 2000);
+            setTimeout(() => {{ 
+              mobileSaveBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg><span>Save</span>'; 
+            }}, 2000);
           }} else {{
             throw new Error(data.message || 'Server returned error');
           }}
         }} catch (err) {{
-          saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-rose-500 bg-rose-500/10 border border-rose-500/25';
+          saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-rose-400 bg-rose-500/10 border border-rose-500/30';
           saveToast.textContent = `Save failed: ${{err.message}}`;
         }}
       }} else {{
-        saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-blue-500 bg-blue-500/10 border border-blue-500/25';
-        saveToast.textContent = 'Saved in memory. (Run .venv/Scripts/python.exe scripts/editor_server.py to auto-save to disk, or edit items/LISTINGS_EDIT.md)';
+        saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-blue-400 bg-blue-500/10 border border-blue-500/30';
+        saveToast.textContent = 'Saved in memory. (Start editor server to persist changes to disk)';
       }}
 
       saveBtn.disabled = false;
-      saveBtn.innerHTML = '<span>💾 Save</span>';
+      saveBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg><span>Save</span>';
       mobileSaveBtn.disabled = false;
       renderTabs();
     }}
@@ -607,12 +740,36 @@ def build_gallery() -> None:
       selectPhoto(currentPhotoIdx);
     }};
 
+    // Full screen modal interaction
+    mainPhoto.onclick = () => {{
+      const item = inventory[currentItemIdx];
+      const ph = item.photos[currentPhotoIdx];
+      if (ph) {{
+        modalPhoto.src = ph.data;
+        modalPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
+        modalFilename.textContent = ph.filename;
+        photoModal.classList.remove('hidden');
+      }}
+    }};
+
+    closeModalBtn.onclick = () => {{
+      photoModal.classList.add('hidden');
+    }};
+
+    modalPrevBtn.onclick = () => {{
+      document.getElementById('prev-btn').click();
+    }};
+
+    modalNextBtn.onclick = () => {{
+      document.getElementById('next-btn').click();
+    }};
+
     function copyDescription() {{
       navigator.clipboard.writeText(editDescription.value).then(() => {{
-        copyDescBtn.textContent = 'Copied!';
+        copyDescBtn.innerHTML = '<span class="text-emerald-400 font-bold">Copied!</span>';
         mobileCopyBtn.textContent = 'Copied!';
         setTimeout(() => {{ 
-          copyDescBtn.textContent = 'Copy'; 
+          copyDescBtn.innerHTML = '<svg class="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg><span>Copy</span>'; 
           mobileCopyBtn.textContent = 'Copy';
         }}, 2000);
       }});
@@ -625,6 +782,9 @@ def build_gallery() -> None:
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {{
         e.preventDefault();
         saveCurrentItem();
+      }}
+      if (e.key === 'Escape' && !photoModal.classList.contains('hidden')) {{
+        photoModal.classList.add('hidden');
       }}
       const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
       if (activeTag !== 'input' && activeTag !== 'textarea') {{
