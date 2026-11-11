@@ -1,0 +1,19 @@
+# Virtual environment
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Local environment and secrets
+.env
+credentials/*.json
+!credentials/service_account.example.json
+
+# Dedicated Chrome Automation Profile
+chrome_profile/
+
+# Working photo & item directories
+raw_photos/*
+!raw_photos/.gitkeep
+items/*
+!items/.gitkeep
