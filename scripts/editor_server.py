@@ -245,13 +245,13 @@ def run_server():
         try:
             # Bind to 0.0.0.0 (all interfaces) so phone on same Wi-Fi can connect
             with socketserver.TCPServer(("", port), ListingEditorHandler) as httpd:
-                print("=" * 68)
-                print("  RESALE LISTING WYSIWYG EDITOR SERVER ACTIVE")
-                print(f"  PC Browser:    http://localhost:{port}")
-                print(f"  Phone / Wi-Fi: http://{lan_ip}:{port}")
-                print(f"  Gallery file:  {gallery_file}")
-                print("  Press Ctrl+C in terminal to stop.")
-                print("=" * 68)
+                print("=" * 68, flush=True)
+                print("  RESALE LISTING WYSIWYG EDITOR SERVER ACTIVE", flush=True)
+                print(f"  PC Browser:    http://localhost:{port}", flush=True)
+                print(f"  Phone / Wi-Fi: http://{lan_ip}:{port}", flush=True)
+                print(f"  Gallery file:  {gallery_file}", flush=True)
+                print("  Press Ctrl+C in terminal to stop.", flush=True)
+                print("=" * 68, flush=True)
                 httpd.serve_forever()
         except OSError:
             print(f"[WARN] Port {port} is in use, trying {port + 1}...")
