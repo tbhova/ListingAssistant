@@ -17,3 +17,4 @@ raw_photos/*
 !raw_photos/.gitkeep
 items/*
 !items/.gitkeep
+scratch/
