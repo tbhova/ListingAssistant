@@ -49,7 +49,11 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
 3. **EXIF Normalization & Orientation Auto-Correction:**
    - Raw phone photos (Pixel, iPhone, Galaxy) require `ImageOps.exif_transpose()` during ingestion to physicalize EXIF rotation.
    - **Overhead / Tabletop Phone Accelerometer Drift:** When a user points a phone straight down at items on a table or carpet, gravity points along the lens axis, causing phone gyro sensors to falsely tag photos as landscape (Orientation 1).
-   - **Visual Orientation Check:** During visual inspection, check label and packaging text orientation. If text reads vertically or upside-down, rotate the image on disk (90°, 180°, or 270°) and re-save so eBay, FBMP, and Craigslist drafts receive 100% upright images.
+   - **Visual Orientation Check & Heuristics:**
+     - **Text Legibility & Embossing:** Any visible labels, stamped text, embossed model numbers, or blow-molded case branding (e.g. Pittsburgh, Craftsman, DeWalt) MUST be right-side up. If text reads upside down, rotate 180° immediately on disk.
+     - **Structural Anatomy:** Latch closures, carry handles, and lid openings typically sit at the top or front facing the viewer in canonical product photography.
+     - **Canonical Comp Comparison:** Once an item is identified via web search or comp lookup, cross-reference the staged photo against canonical manufacturer photos to guarantee correct presentation.
+   - **Persistent Disk Rotation:** Photos rotated in the WYSIWYG editor or during review must be burned into disk pixels with `ImageOps.exif_transpose()` so marketplaces that strip EXIF tags display correctly.
 
 4. **Timestamp Thresholds vs. Visual Discontinuity (The 25s–90s Lesson):**
    - **Why pure timestamp reduction fails:** Setting the threshold too short (e.g., <30s) shatters complex multi-angle mechanical equipment, shoes, or furniture into false separate items (pauses of 45–90s are normal while rotating a table saw, adjusting chair tilt, or checking shoe soles). Yet rapid tabletop swaps of small tools often occur in 25–32s, causing false merges under a 45–60s threshold.
@@ -86,6 +90,7 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
      - `weight_lbs`: Estimated packaged shipping weight in pounds (float).
      - `dimensions_in`: Estimated packaged box dimensions `[Length, Width, Height]` in inches.
      - `comp_price`: Estimated eBay sold comparable price in USD (float).
+     - `quantity`: Available inventory count (integer, default 1). If > 1, reflected in eBay multi-quantity inventory and listing copy.
      - `uncertainty_score`: Integer `0–100` indicating how uncertain you are about model ID, working condition, completeness, or comp value.
      - `grill_questions`: Array of specific clarifying questions for the user (e.g., `"Photo 3 shows the back label slightly blurred—what is the exact serial/model suffix?"`, `"Does this unit power on and pass audio testing?"`).
      - `description_detailed`: Rich, structured draft description for high-priority/high-value items.

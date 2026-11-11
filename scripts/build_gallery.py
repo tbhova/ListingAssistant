@@ -1,6 +1,7 @@
 """
 build_gallery.py - Generate Interactive Resale Batch Inspector & WYSIWYG Editor HTML
-Optimized for desktop and mobile phone browsers over local Wi-Fi with Dark Mode by default.
+Optimized for desktop and mobile phone browsers over local Wi-Fi with Dark Mode by default,
+fast thumbnail caching, horizontal scroll arrows, and auto-save on tab switch.
 
 Outputs:
   - items/batch_gallery.html
@@ -13,6 +14,7 @@ import base64
 import io
 import json
 import os
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 from PIL import Image, ImageOps
@@ -20,6 +22,7 @@ from PIL import Image, ImageOps
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 ITEMS_DIR = WORKSPACE_ROOT / "items"
 MANIFEST_PATH = ITEMS_DIR / "batch_manifest.json"
+CACHE_PATH = ITEMS_DIR / ".thumb_cache.json"
 
 
 def get_output_paths() -> List[Path]:
@@ -45,6 +48,7 @@ def get_output_paths() -> List[Path]:
 
 
 def build_gallery() -> None:
+    t0 = time.perf_counter()
     if not MANIFEST_PATH.exists():
         print(f"[ERROR] Manifest not found: {MANIFEST_PATH}")
         return
@@ -53,7 +57,16 @@ def build_gallery() -> None:
     raw_items = manifest.get("items", [])
     sorted_items = sorted(raw_items, key=lambda x: x.get("item_id", ""))
 
+    # Load thumbnail cache
+    thumb_cache: Dict[str, str] = {}
+    if CACHE_PATH.exists():
+        try:
+            thumb_cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            thumb_cache = {}
+
     processed_inventory: List[Dict[str, Any]] = []
+    cache_dirty = False
 
     for item in sorted_items:
         item_id = item.get("item_id", "item_XX")
@@ -65,16 +78,28 @@ def build_gallery() -> None:
         
         for pf in photo_files:
             try:
-                with Image.open(pf) as raw_img:
-                    img = ImageOps.exif_transpose(raw_img)
-                    img.thumbnail((720, 720), Image.Resampling.LANCZOS)
-                    buf = io.BytesIO()
-                    img.save(buf, format="JPEG", quality=68, optimize=True)
-                    b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                mtime = pf.stat().st_mtime
+                cache_key = f"{item_id}/{pf.name}:{mtime}"
+                
+                if cache_key in thumb_cache:
                     b64_photos.append({
                         "filename": pf.name,
-                        "data": f"data:image/jpeg;base64,{b64}"
+                        "data": thumb_cache[cache_key]
                     })
+                else:
+                    with Image.open(pf) as raw_img:
+                        img = ImageOps.exif_transpose(raw_img)
+                        img.thumbnail((720, 720), Image.Resampling.LANCZOS)
+                        buf = io.BytesIO()
+                        img.save(buf, format="JPEG", quality=68, optimize=True)
+                        b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                        data_uri = f"data:image/jpeg;base64,{b64}"
+                        thumb_cache[cache_key] = data_uri
+                        cache_dirty = True
+                        b64_photos.append({
+                            "filename": pf.name,
+                            "data": data_uri
+                        })
             except Exception as e:
                 print(f"[WARN] Error encoding photo {pf}: {e}")
                 
@@ -126,6 +151,12 @@ def build_gallery() -> None:
             "photos": b64_photos
         })
 
+    if cache_dirty:
+        try:
+            CACHE_PATH.write_text(json.dumps(thumb_cache), encoding="utf-8")
+        except Exception as e:
+            print(f"[WARN] Failed to write cache: {e}")
+
     json_str = json.dumps(processed_inventory)
 
     html_template = f"""<!DOCTYPE html>
@@ -160,6 +191,16 @@ def build_gallery() -> None:
 
     /* Smooth touch scrolling */
     .touch-scroll {{ -webkit-overflow-scrolling: touch; }}
+
+    /* Hide scrollbar for Chrome, Safari and Opera */
+    .no-scrollbar::-webkit-scrollbar {{
+      display: none;
+    }}
+    /* Hide scrollbar for IE, Edge and Firefox */
+    .no-scrollbar {{
+      -ms-overflow-style: none;  /* IE and Edge */
+      scrollbar-width: none;  /* Firefox */
+    }}
 
     /* Dark Mode Scrollbars */
     ::-webkit-scrollbar {{
@@ -209,8 +250,25 @@ def build_gallery() -> None:
       </div>
     </div>
 
-    <!-- Item Selector Tabs -->
-    <div class="flex gap-1.5 overflow-x-auto pb-1.5 scrollbar-thin touch-scroll" id="item-tabs"></div>
+    <!-- Item Selector Tabs Wrapper with Modern Edge Scroll Arrows -->
+    <div class="relative group">
+      <!-- Left Scroll Arrow Overlay -->
+      <button id="tabs-scroll-left" class="absolute left-0 top-0 bottom-0 z-20 px-2 bg-gradient-to-r from-[#111827] via-[#111827]/90 to-transparent flex items-center justify-center text-slate-300 hover:text-white transition-opacity opacity-0 group-hover:opacity-100 disabled:pointer-events-none" title="Scroll left">
+        <div class="p-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-md hover:bg-slate-700">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 19l-7-7 7-7"></path></svg>
+        </div>
+      </button>
+
+      <!-- Scrollable Tabs Strip -->
+      <div class="flex gap-1.5 overflow-x-auto pb-1.5 scroll-smooth no-scrollbar touch-scroll px-1" id="item-tabs"></div>
+
+      <!-- Right Scroll Arrow Overlay -->
+      <button id="tabs-scroll-right" class="absolute right-0 top-0 bottom-0 z-20 px-2 bg-gradient-to-l from-[#111827] via-[#111827]/90 to-transparent flex items-center justify-center text-slate-300 hover:text-white transition-opacity opacity-0 group-hover:opacity-100 disabled:pointer-events-none" title="Scroll right">
+        <div class="p-1.5 rounded-full bg-slate-800/80 border border-slate-700 shadow-md hover:bg-slate-700">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"></path></svg>
+        </div>
+      </button>
+    </div>
 
     <!-- Active Item Header Card with Inline Editable Title & Price -->
     <div class="bg-[#0b0f19]/80 border border-[#1f2937] rounded-xl p-3 sm:p-4 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-3 sm:gap-4 shadow-sm">
@@ -265,13 +323,13 @@ def build_gallery() -> None:
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
           </button>
 
-          <!-- Top-right Quick Rotate Controls -->
+          <!-- Top-right Quick Rotate Controls with Permanent Disk Persistence -->
           <div class="absolute top-2.5 right-2.5 flex gap-1.5 opacity-90 hover:opacity-100 transition-opacity">
-            <button id="rotate-left-btn" title="Rotate Left 90°" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+            <button id="rotate-left-btn" title="Rotate Left 90° & Save" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a5 5 0 015 5v2m0 0l-3-3m3 3l3-3M3 10l3-3m-3 3l3 3"></path></svg>
               <span>↺</span>
             </button>
-            <button id="rotate-right-btn" title="Rotate Right 90° (Shortcut: R)" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
+            <button id="rotate-right-btn" title="Rotate Right 90° & Save (Shortcut: R)" class="bg-black/80 hover:bg-black text-white px-2.5 py-1.5 rounded-lg border border-white/20 text-xs flex items-center gap-1 backdrop-blur shadow active:scale-95">
               <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 10H11a5 5 0 00-5 5v2m0 0l3-3m-3 3l-3-3m5-6l-3-3m3 3l-3 3"></path></svg>
               <span>↻</span>
             </button>
@@ -368,7 +426,7 @@ def build_gallery() -> None:
           </div>
           
           <div class="text-[10px] text-slate-400 flex justify-between items-center pt-0.5">
-            <span>Desktop: <kbd class="px-1 py-0.5 rounded bg-[#090d16] border border-[#1f2937] text-slate-300">Ctrl+S</kbd></span>
+            <span>Desktop: <kbd class="px-1 py-0.5 rounded bg-[#090d16] border border-[#1f2937] text-slate-300">Ctrl+S</kbd> • Auto-saves on tab change</span>
             <span id="char-counter" class="font-mono">0 chars</span>
           </div>
         </div>
@@ -420,7 +478,8 @@ def build_gallery() -> None:
     let currentRotation = 0;
     let isLiveServer = false;
     let serverBaseUrl = '';
-    let currentMode = 'edit'; // 'edit' or 'preview'
+    let currentMode = 'edit';
+    let isDirty = false;
 
     const statusPill = document.getElementById('server-status-pill');
     const statusDot = document.getElementById('server-dot');
@@ -469,6 +528,16 @@ def build_gallery() -> None:
     checkServer();
 
     const tabsContainer = document.getElementById('item-tabs');
+    const scrollLeftBtn = document.getElementById('tabs-scroll-left');
+    const scrollRightBtn = document.getElementById('tabs-scroll-right');
+
+    scrollLeftBtn.onclick = () => {{
+      tabsContainer.scrollBy({{ left: -260, behavior: 'smooth' }});
+    }};
+    scrollRightBtn.onclick = () => {{
+      tabsContainer.scrollBy({{ left: 260, behavior: 'smooth' }});
+    }};
+
     const mainPhoto = document.getElementById('main-photo');
     const photoFilename = document.getElementById('photo-filename');
     const photoCounter = document.getElementById('photo-counter');
@@ -518,12 +587,19 @@ def build_gallery() -> None:
     const modalPrevBtn = document.getElementById('modal-prev-btn');
     const modalNextBtn = document.getElementById('modal-next-btn');
 
+    // Mark dirty when editing any field
+    [editTitle, editCompPrice, editCondition, editNotes, editDescription].forEach(el => {{
+      el.addEventListener('input', () => {{ isDirty = true; }});
+      el.addEventListener('change', () => {{ isDirty = true; }});
+    }});
+
     function renderTabs() {{
       tabsContainer.innerHTML = '';
       inventory.forEach((item, idx) => {{
         const btn = document.createElement('button');
         const isActive = idx === currentItemIdx;
-        btn.className = `px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border ${{
+        btn.id = `tab-item-${{idx}}`;
+        btn.className = `px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-all border shrink-0 ${{
           isActive 
             ? 'bg-blue-600 text-white border-blue-500 shadow-sm' 
             : 'bg-[#111827] hover:bg-[#1f2937] text-slate-300 border-[#1f2937]'
@@ -532,9 +608,25 @@ def build_gallery() -> None:
         btn.onclick = () => selectItem(idx);
         tabsContainer.appendChild(btn);
       }});
+      
+      // Auto-scroll selected tab into view so it's fully visible
+      setTimeout(() => {{
+        const activeBtn = document.getElementById(`tab-item-${{currentItemIdx}}`);
+        if (activeBtn) {{
+          activeBtn.scrollIntoView({{ behavior: 'smooth', inline: 'center', block: 'nearest' }});
+        }}
+      }}, 50);
     }}
 
     function selectItem(idx) {{
+      if (idx === currentItemIdx) return;
+
+      // Auto-save pending changes on tab switch
+      if (isDirty) {{
+        saveCurrentItem(true);
+        isDirty = false;
+      }}
+
       currentItemIdx = idx;
       currentPhotoIdx = 0;
       currentRotation = 0;
@@ -581,6 +673,7 @@ def build_gallery() -> None:
       updateCharCounter();
       copyDescBtn.innerHTML = '<span>Copy</span>';
       saveToast.className = 'hidden';
+      isDirty = false;
 
       // Thumbnails
       thumbsStrip.innerHTML = '';
@@ -604,6 +697,7 @@ def build_gallery() -> None:
       Array.from(thumbsStrip.children).forEach((child, idx) => {{
         if (idx === currentPhotoIdx) {{
           child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all border-blue-500 ring-2 ring-blue-500/40 opacity-100';
+          child.scrollIntoView({{ behavior: 'smooth', inline: 'center', block: 'nearest' }});
         }} else {{
           child.className = 'w-14 h-14 sm:w-16 sm:h-16 shrink-0 rounded-lg overflow-hidden border-2 cursor-pointer transition-all border-[#1f2937] opacity-60 hover:opacity-100';
         }}
@@ -661,7 +755,7 @@ def build_gallery() -> None:
     }};
 
     // Save action
-    async function saveCurrentItem() {{
+    async function saveCurrentItem(silent = false) {{
       const item = inventory[currentItemIdx];
       item.title = editTitle.value.trim();
       item.comp_price = parseFloat(editCompPrice.value) || item.comp_price;
@@ -669,13 +763,16 @@ def build_gallery() -> None:
       item.condition_notes = editNotes.value.trim();
       item.description_detailed = editDescription.value.trim();
 
-      saveBtn.disabled = true;
-      saveBtn.innerHTML = '<span>Saving...</span>';
-      mobileSaveBtn.disabled = true;
-      mobileSaveBtn.innerHTML = '<span>Saving...</span>';
+      if (!silent) {{
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = '<span>Saving...</span>';
+        mobileSaveBtn.disabled = true;
+        mobileSaveBtn.innerHTML = '<span>Saving...</span>';
+      }}
 
       if (isLiveServer) {{
         try {{
+          const tReqStart = performance.now();
           const res = await fetch(`${{serverBaseUrl}}/api/save-listing`, {{
             method: 'POST',
             headers: {{ 'Content-Type': 'application/json' }},
@@ -690,9 +787,12 @@ def build_gallery() -> None:
           }});
 
           const data = await res.json();
+          const roundTripMs = Math.round(performance.now() - tReqStart);
+
           if (res.ok && data.status === 'ok') {{
+            isDirty = false;
             saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30';
-            saveToast.textContent = '✓ Saved to disk & synced to LISTINGS_EDIT.md!';
+            saveToast.textContent = `✓ Saved in ${{roundTripMs}}ms (Server: ${{data.telemetry ? data.telemetry.total_ms : 'ok'}}ms)!`;
             mobileSaveBtn.innerHTML = '<span>✓ Saved</span>';
             setTimeout(() => {{ 
               mobileSaveBtn.innerHTML = '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg><span>Save</span>'; 
@@ -709,24 +809,57 @@ def build_gallery() -> None:
         saveToast.textContent = 'Saved in memory. (Start editor server to persist changes to disk)';
       }}
 
-      saveBtn.disabled = false;
-      saveBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg><span>Save</span>';
-      mobileSaveBtn.disabled = false;
+      if (!silent) {{
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg><span>Save</span>';
+        mobileSaveBtn.disabled = false;
+      }}
       renderTabs();
     }}
 
-    saveBtn.onclick = saveCurrentItem;
-    mobileSaveBtn.onclick = saveCurrentItem;
+    saveBtn.onclick = () => saveCurrentItem(false);
+    mobileSaveBtn.onclick = () => saveCurrentItem(false);
 
-    document.getElementById('rotate-left-btn').onclick = () => {{
-      currentRotation = (currentRotation - 90) % 360;
-      mainPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
-    }};
+    // Rotation handler with direct API persistence to disk
+    async function rotatePhoto(deg) {{
+      const item = inventory[currentItemIdx];
+      const ph = item.photos[currentPhotoIdx];
+      if (!ph) return;
 
-    document.getElementById('rotate-right-btn').onclick = () => {{
-      currentRotation = (currentRotation + 90) % 360;
+      currentRotation = (currentRotation + deg) % 360;
       mainPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
-    }};
+      if (!photoModal.classList.contains('hidden')) {{
+        modalPhoto.style.transform = `rotate(${{currentRotation}}deg)`;
+      }}
+
+      if (isLiveServer) {{
+        saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-blue-400 bg-blue-500/10 border border-blue-500/30';
+        saveToast.textContent = `Saving rotation to disk...`;
+        try {{
+          const res = await fetch(`${{serverBaseUrl}}/api/save-rotation`, {{
+            method: 'POST',
+            headers: {{ 'Content-Type': 'application/json' }},
+            body: JSON.stringify({{
+              item_id: item.id,
+              filename: ph.filename,
+              angle: deg > 0 ? 90 : 270
+            }})
+          }});
+          const data = await res.json();
+          if (res.ok && data.status === 'ok') {{
+            saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-emerald-400 bg-emerald-500/10 border border-emerald-500/30';
+            saveToast.textContent = `✓ Rotation saved to disk!`;
+            setTimeout(() => {{ saveToast.className = 'hidden'; }}, 2500);
+          }}
+        }} catch (err) {{
+          saveToast.className = 'px-2.5 py-1 rounded text-xs font-medium text-rose-400 bg-rose-500/10 border border-rose-500/30';
+          saveToast.textContent = `Rotation save failed: ${{err.message}}`;
+        }}
+      }}
+    }}
+
+    document.getElementById('rotate-left-btn').onclick = () => rotatePhoto(-90);
+    document.getElementById('rotate-right-btn').onclick = () => rotatePhoto(90);
 
     document.getElementById('prev-btn').onclick = () => {{
       const item = inventory[currentItemIdx];
@@ -781,7 +914,7 @@ def build_gallery() -> None:
     window.addEventListener('keydown', (e) => {{
       if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {{
         e.preventDefault();
-        saveCurrentItem();
+        saveCurrentItem(false);
       }}
       if (e.key === 'Escape' && !photoModal.classList.contains('hidden')) {{
         photoModal.classList.add('hidden');
@@ -804,7 +937,8 @@ def build_gallery() -> None:
     for out_path in get_output_paths():
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(html_template, encoding="utf-8")
-        print(f"[OK] Gallery written to {out_path} ({len(html_template)} bytes)")
+        elapsed = (time.perf_counter() - t0) * 1000
+        print(f"[OK] Gallery written to {out_path} ({len(html_template)} bytes in {elapsed:.1f}ms)")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 """
 editor_server.py - Zero-Dependency Local HTTP Server for WYSIWYG Listing Editing
-Supports desktop and mobile phone editing over local Wi-Fi.
+Supports desktop and mobile phone editing over local Wi-Fi with Telemetry and Fast Persistence.
 
 Run:
     .venv\\Scripts\\python.exe scripts/editor_server.py
@@ -15,9 +15,10 @@ import socket
 import socketserver
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
-from PIL import Image
+from PIL import Image, ImageOps
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 ITEMS_DIR = WORKSPACE_ROOT / "items"
@@ -29,7 +30,6 @@ def get_local_lan_ip() -> str:
     """Detect the local Wi-Fi/Ethernet IP address of this machine."""
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
-        # Doesn't need to be reachable, triggers OS socket route table lookup
         s.connect(("10.255.255.255", 1))
         ip = s.getsockname()[0]
     except Exception:
@@ -127,6 +127,7 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def _handle_save_listing(self):
+        t0 = time.perf_counter()
         try:
             content_len = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_len)
@@ -157,22 +158,35 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
                 v_data["accessories"] = payload["accessories"]
 
             v_file.write_text(json.dumps(v_data, indent=2), encoding="utf-8")
-            print(f"[SERVER] Updated {v_file.name} for {item_id}")
+            t_disk = time.perf_counter()
 
             # Re-calculate economics & refresh manifest
             calc_script = SCRIPTS_DIR / "analyze_items.py"
             if calc_script.exists():
                 subprocess.run([sys.executable, str(calc_script), "--calculate"], check=True)
+            t_econ = time.perf_counter()
 
             # Export to LISTINGS_EDIT.md
             sync_script = SCRIPTS_DIR / "sync_listings.py"
             if sync_script.exists():
                 subprocess.run([sys.executable, str(sync_script), "--export"], check=True)
+            t_sync = time.perf_counter()
 
-            # Rebuild gallery HTML
+            # Rebuild gallery HTML with cached thumbnails
             builder_script = SCRIPTS_DIR / "build_gallery.py"
             if builder_script.exists():
                 subprocess.run([sys.executable, str(builder_script)], check=True)
+            t_gallery = time.perf_counter()
+
+            total_ms = (t_gallery - t0) * 1000
+            print(
+                f"[TELEMETRY] Save {item_id} completed in {total_ms:.1f}ms: "
+                f"JSON={ (t_disk - t0)*1000:.1f}ms, "
+                f"Econ={ (t_econ - t_disk)*1000:.1f}ms, "
+                f"MD={ (t_sync - t_econ)*1000:.1f}ms, "
+                f"Gallery={ (t_gallery - t_sync)*1000:.1f}ms",
+                flush=True
+            )
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -180,11 +194,18 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "status": "ok",
-                "message": f"Successfully saved {item_id} to disk and synced manifest & markdown!"
+                "message": f"Successfully saved {item_id} in {total_ms:.1f}ms",
+                "telemetry": {
+                    "total_ms": round(total_ms, 1),
+                    "json_ms": round((t_disk - t0) * 1000, 1),
+                    "econ_ms": round((t_econ - t_disk) * 1000, 1),
+                    "markdown_ms": round((t_sync - t_econ) * 1000, 1),
+                    "gallery_ms": round((t_gallery - t_sync) * 1000, 1)
+                }
             }).encode("utf-8"))
 
         except Exception as exc:
-            print(f"[SERVER ERROR] Failed to save listing: {exc}")
+            print(f"[SERVER ERROR] Failed to save listing: {exc}", flush=True)
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -192,6 +213,7 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "error", "message": str(exc)}).encode("utf-8"))
 
     def _handle_save_rotation(self):
+        t0 = time.perf_counter()
         try:
             content_len = int(self.headers.get("Content-Length", 0))
             post_data = self.rfile.read(content_len)
@@ -208,15 +230,25 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
             if not target_file.exists():
                 raise FileNotFoundError(f"File not found: {target_file}")
 
-            with Image.open(target_file) as img:
-                rotated = img.rotate(360 - angle, expand=True)
+            # Apply EXIF transposition first, then rotate clockwise
+            with Image.open(target_file) as raw_img:
+                img = ImageOps.exif_transpose(raw_img)
+                # PIL rotate angle is counter-clockwise, so (360 - angle) rotates clockwise
+                pil_angle = (360 - angle) % 360
+                rotated = img.rotate(pil_angle, expand=True)
                 rotated.save(target_file, quality=95, optimize=True)
 
-            print(f"[SERVER] Permanently rotated {target_file.name} by {angle} deg clockwise on disk")
+            t_rot = time.perf_counter()
+            print(f"[SERVER] Permanently rotated {target_file.name} by {angle}° CW on disk ({(t_rot - t0)*1000:.1f}ms)", flush=True)
 
+            # Rebuild gallery HTML so thumbnail cache updates
             builder_script = SCRIPTS_DIR / "build_gallery.py"
             if builder_script.exists():
                 subprocess.run([sys.executable, str(builder_script)], check=True)
+            t_end = time.perf_counter()
+
+            total_ms = (t_end - t0) * 1000
+            print(f"[TELEMETRY] Rotation {filename} finished in {total_ms:.1f}ms", flush=True)
 
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -224,11 +256,11 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({
                 "status": "ok",
-                "message": f"Rotated and saved {filename} to disk!"
+                "message": f"Rotated {filename} by {angle}° in {total_ms:.1f}ms"
             }).encode("utf-8"))
 
         except Exception as exc:
-            print(f"[SERVER ERROR] Failed to rotate image: {exc}")
+            print(f"[SERVER ERROR] Failed to rotate image: {exc}", flush=True)
             self.send_response(500)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -243,7 +275,6 @@ def run_server():
 
     for attempt in range(5):
         try:
-            # Bind to 0.0.0.0 (all interfaces) so phone on same Wi-Fi can connect
             with socketserver.TCPServer(("", port), ListingEditorHandler) as httpd:
                 print("=" * 68, flush=True)
                 print("  RESALE LISTING WYSIWYG EDITOR SERVER ACTIVE", flush=True)
@@ -254,7 +285,7 @@ def run_server():
                 print("=" * 68, flush=True)
                 httpd.serve_forever()
         except OSError:
-            print(f"[WARN] Port {port} is in use, trying {port + 1}...")
+            print(f"[WARN] Port {port} is in use, trying {port + 1}...", flush=True)
             port += 1
 
 

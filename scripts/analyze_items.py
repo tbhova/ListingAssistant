@@ -203,8 +203,11 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     )
 
     # Assign Routing Bucket
-    routing_reason = ""
-    if is_bulky_or_heavy and comp_price >= min_comp_local_only and net_profit < min_profit_all_three:
+    explicit_bucket = item_data.get("routing_bucket")
+    if explicit_bucket and explicit_bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_ONLY", "DONATE_OR_LOT"):
+        routing_bucket = explicit_bucket
+        routing_reason = f"Explicit override: {explicit_bucket}."
+    elif is_bulky_or_heavy and comp_price >= min_comp_local_only and net_profit < min_profit_all_three:
         routing_bucket = "LOCAL_ONLY"
         routing_reason = (
             f"Heavy/bulky ({weight_lbs} lbs, max side {max_side}\", shipping ${est_shipping:.2f} = "
