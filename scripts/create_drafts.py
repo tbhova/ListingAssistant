@@ -131,11 +131,18 @@ async def create_ebay_draft(
         "button:has-text('Skip')",
     ]
     for sel in continue_without_match:
-        loc = page.locator(sel).first
-        if await loc.count() > 0 and await loc.is_visible():
-            await loc.click()
-            await page.wait_for_timeout(2000)
-            break
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible():
+                for _ in range(10):
+                    if await loc.is_enabled():
+                        await loc.click(timeout=3000)
+                        await page.wait_for_timeout(2000)
+                        break
+                    await page.wait_for_timeout(500)
+                break
+        except Exception as exc:
+            print(f"  [eBay] Prelist catalog match note: {exc}")
 
     # Step 3: Condition selection modal if prompted before form
     if "new" in condition_str and "like" not in condition_str:
@@ -516,25 +523,44 @@ async def run_draft_pipeline(
             run_fbmp = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "fbmp")
             run_cl = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "craigslist")
 
-            if run_ebay:
-                ebay_url = await create_ebay_draft(context, item, dry_run=dry_run)
-                item["ebay_draft_url"] = ebay_url
+            needs_ebay = run_ebay and not item.get("ebay_draft_url")
+            needs_fbmp = run_fbmp and not item.get("fbmp_listing_url")
+            needs_cl = run_cl and not item.get("craigslist_edit_url")
 
-            if run_fbmp:
-                fbmp_url = await create_fbmp_draft(context, item, dry_run=dry_run)
-                item["fbmp_listing_url"] = fbmp_url
+            if not (needs_ebay or needs_fbmp or needs_cl) and not sku_filter:
+                print(f"[SKIP] {sku} ({item.get('item_id')}) already has all required drafts created.", flush=True)
+                continue
 
-            if run_cl:
-                cl_url = await create_craigslist_preview(context, item, dry_run=dry_run)
-                item["craigslist_edit_url"] = cl_url
+            if needs_ebay:
+                try:
+                    ebay_url = await create_ebay_draft(context, item, dry_run=dry_run)
+                    item["ebay_draft_url"] = ebay_url
+                except Exception as exc:
+                    print(f"  [eBay ERROR] {exc}", flush=True)
+
+            if needs_fbmp:
+                try:
+                    fbmp_url = await create_fbmp_draft(context, item, dry_run=dry_run)
+                    item["fbmp_listing_url"] = fbmp_url
+                except Exception as exc:
+                    print(f"  [FBMP ERROR] {exc}", flush=True)
+
+            if needs_cl:
+                try:
+                    cl_url = await create_craigslist_preview(context, item, dry_run=dry_run)
+                    item["craigslist_edit_url"] = cl_url
+                except Exception as exc:
+                    print(f"  [Craigslist ERROR] {exc}", flush=True)
 
             item["status"] = "DRAFTS_CREATED" if not dry_run else "DRY_RUN_VERIFIED"
             item["drafted_at"] = datetime.now().isoformat()
 
-            # Persist per-item analysis.json
+            # Persist per-item analysis.json and batch_manifest.json
             folder_path = Path(item.get("folder_path", ""))
             if folder_path.exists():
                 (folder_path / "analysis.json").write_text(json.dumps(item, indent=2), encoding="utf-8")
+            manifest["updated_at"] = datetime.now().isoformat()
+            manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
         manifest["updated_at"] = datetime.now().isoformat()
         manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
