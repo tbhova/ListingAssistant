@@ -1,10 +1,9 @@
 """
 editor_server.py - Zero-Dependency Local HTTP Server for WYSIWYG Listing Editing
+Supports desktop and mobile phone editing over local Wi-Fi.
 
 Run:
     .venv\\Scripts\\python.exe scripts/editor_server.py
-Then open:
-    http://localhost:8000
 """
 
 from __future__ import annotations
@@ -12,6 +11,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import socket
 import socketserver
 import subprocess
 import sys
@@ -23,6 +23,23 @@ WORKSPACE_ROOT = Path(__file__).resolve().parent.parent
 ITEMS_DIR = WORKSPACE_ROOT / "items"
 SCRIPTS_DIR = WORKSPACE_ROOT / "scripts"
 PORT = 8000
+
+
+def get_local_lan_ip() -> str:
+    """Detect the local Wi-Fi/Ethernet IP address of this machine."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # Doesn't need to be reachable, triggers OS socket route table lookup
+        s.connect(("10.255.255.255", 1))
+        ip = s.getsockname()[0]
+    except Exception:
+        try:
+            ip = socket.gethostbyname(socket.gethostname())
+        except Exception:
+            ip = "127.0.0.1"
+    finally:
+        s.close()
+    return ip
 
 
 def get_gallery_html_path() -> Optional[Path]:
@@ -39,7 +56,6 @@ def get_gallery_html_path() -> Optional[Path]:
         if c.exists():
             return c
 
-    # Search user's antigravity brain folder dynamically
     home = Path.home()
     brain_base = home / ".gemini" / "antigravity" / "brain"
     if brain_base.exists():
@@ -75,11 +91,19 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
                 return
 
         if self.path == "/api/status":
+            lan_ip = get_local_lan_ip()
+            port = self.server.server_address[1]
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-            self.wfile.write(json.dumps({"status": "ok", "mode": "live_server"}).encode("utf-8"))
+            self.wfile.write(json.dumps({
+                "status": "ok",
+                "mode": "live_server",
+                "lan_ip": lan_ip,
+                "port": port,
+                "phone_url": f"http://{lan_ip}:{port}"
+            }).encode("utf-8"))
             return
 
         super().do_GET()
@@ -140,7 +164,7 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
             if calc_script.exists():
                 subprocess.run([sys.executable, str(calc_script), "--calculate"], check=True)
 
-            # Export to LISTINGS_EDIT.md so both options stay in sync!
+            # Export to LISTINGS_EDIT.md
             sync_script = SCRIPTS_DIR / "sync_listings.py"
             if sync_script.exists():
                 subprocess.run([sys.executable, str(sync_script), "--export"], check=True)
@@ -214,16 +238,20 @@ class ListingEditorHandler(http.server.SimpleHTTPRequestHandler):
 
 def run_server():
     port = PORT
+    lan_ip = get_local_lan_ip()
     gallery_file = get_gallery_html_path()
+
     for attempt in range(5):
         try:
+            # Bind to 0.0.0.0 (all interfaces) so phone on same Wi-Fi can connect
             with socketserver.TCPServer(("", port), ListingEditorHandler) as httpd:
-                print("=" * 65)
-                print(f"  RESALE LISTING WYSIWYG EDITOR SERVER ACTIVE")
-                print(f"  URL: http://localhost:{port}")
-                print(f"  Gallery file: {gallery_file}")
+                print("=" * 68)
+                print("  RESALE LISTING WYSIWYG EDITOR SERVER ACTIVE")
+                print(f"  PC Browser:    http://localhost:{port}")
+                print(f"  Phone / Wi-Fi: http://{lan_ip}:{port}")
+                print(f"  Gallery file:  {gallery_file}")
                 print("  Press Ctrl+C in terminal to stop.")
-                print("=" * 65)
+                print("=" * 68)
                 httpd.serve_forever()
         except OSError:
             print(f"[WARN] Port {port} is in use, trying {port + 1}...")
