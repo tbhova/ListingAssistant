@@ -62,7 +62,27 @@ Before finishing setup, **interview the user** (using your `ask_question` tool o
    - *Ask:* "Do you want to sync your inventory to a Google Sheet right now (paste your Google Sheet URL and I'll extract the `GOOGLE_SHEET_ID`), or use the automatic local CSV mirror (`items/master_inventory.csv`) first?"
    - *Agent Action:* If the user pastes a full URL like `https://docs.google.com/spreadsheets/d/1-XY5ts3HF.../edit`, extract the ID between `/d/` and `/edit` and write it to `GOOGLE_SHEET_ID`. Point them to [`credentials/README.md`](./credentials/README.md) when they are ready to drop in `credentials/service_account.json`.
 
-### Step 3: One-Time Dedicated Chrome Profile Login (Optional Now or Before Stage 4)
+### Step 3: Back Up `.env` to Google Drive (Recommended)
+Once the user's `.env` file is configured, offer to back it up to their personal **Google Drive** so their private configuration (`ORIGIN_ZIP`, `GOOGLE_SHEET_ID`, and API keys) is safely stored in the cloud without ever being committed to Git:
+
+1. Check if the Antigravity **Google Drive** plugin (`antigravity-plugins-official/plugin/gdrive`) is installed, or suggest installing it.
+2. Create a private backup folder in their Google Drive root (or check if one already exists):
+   ```bash
+   gdrive readonly search --name-contains "ListingAssistant_Backups"
+   gdrive mutate mkdir "ListingAssistant_Backups" --parent root
+   ```
+3. Upload (or update in-place) the user's `.env` file into that folder:
+   ```bash
+   # First-time upload:
+   gdrive mutate upload .env --parent <FOLDER_ID>
+
+   # Updating an existing backup in-place:
+   gdrive mutate update <FILE_ID> .env
+   ```
+4. Save the returned `GOOGLE_DRIVE_BACKUP_FOLDER_ID` and `GOOGLE_DRIVE_ENV_FILE_ID` into `.env`.
+   *(On any future machine, the agent can restore `.env` in one command via `gdrive readonly download <FILE_ID> --out .env`!)*
+
+### Step 4: One-Time Dedicated Chrome Profile Login (Optional Now or Before Stage 4)
 Tell the user they can initialize their dedicated Chrome automation profile (`./chrome_profile` on CDP port `9222`) whenever they are ready to generate browser drafts:
 ```powershell
 .\.venv\Scripts\python.exe scripts/launch_chrome.py --login-setup
@@ -122,6 +142,6 @@ ListingAssistant/
 
 ## 🔒 Keeping Your Personal `.env` Backed Up Privately (Optional)
 
-Because `.env` is ignored in `.gitignore`, your personal ZIP code, Google Sheet ID, and API keys are never pushed to this public repository. If you want to version-control your personal `.env` across machines:
-1. Keep your real `.env` in a private GitHub Gist or private repository (e.g., `my-private-dotfiles`), **or**
-2. Fork this repository as a **Private** fork for your personal machine and pull upstream skill updates anytime with `git pull upstream main`.
+Because `.env` is ignored in `.gitignore`, your personal ZIP code, Google Sheet ID, and API keys are never pushed to this public repository. To back up or restore your personal `.env` across machines:
+1. **Google Drive (Built into Onboarding Step 3):** Ask your agent to *"Back up my `.env` to Google Drive"* (uses `gdrive mutate update <GOOGLE_DRIVE_ENV_FILE_ID> .env`) or *"Restore my ListingAssistant `.env` from Google Drive"* (`gdrive readonly download <GOOGLE_DRIVE_ENV_FILE_ID> --out .env`).
+2. **Private Dotfiles / Gist:** Alternatively, store `.env` in a private GitHub Gist or private repository.
