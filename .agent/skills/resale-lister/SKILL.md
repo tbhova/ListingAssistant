@@ -141,11 +141,18 @@ Only execute Stage 4 **after** the user explicitly approves the review queue fro
    ```powershell
    .venv\Scripts\python.exe scripts/create_drafts.py
    ```
-   *(Supports `--sku <SKU>` to run a single item, `--platform ebay|fbmp|craigslist`, or `--dry-run` to verify selectors without modifying forms).*
+   *(Supports `--sku <SKU>` to run a single item, `--platform ebay|fbmp|craigslist`, `--overwrite` to re-draft existing items, or `--dry-run` to verify selectors without modifying forms).*
+
+   **Craigslist Direct Posting Architecture:**
+   - Navigates directly to `https://post.craigslist.org/c/<post_code>` (e.g. `sfo` for `sfbay`) to bypass framed `cl-framed-application-iframe` embedding and prevent silent redirect to Aberdeen.
+   - Automatically handles location hierarchy: Sub-area (`south bay area`) -> Neighborhood (`san jose west`) -> Posting Type (`for sale by owner` / `fso`).
+   - Maps eBay category taxonomy + item title to Craigslist categories (`tools`, `video gaming`, `furniture`, `appliances`, `bicycles`, `farm & garden`, `clothing & accessories`, `auto parts`, etc.).
+   - Dispatches custom DOM events for hidden jQuery UI dropdowns (e.g. `select[name='condition']`).
+   - Always uploads original, full-resolution raw camera images (never thumbnails or downscaled assets).
 3. **Hard Safety Rule:** `scripts/create_drafts.py` is hard-coded to **NEVER** click final `"Publish"`, `"List Item"`, or `"List It"` buttons:
    - **eBay:** Uploads photos, fills title, item specifics, description, price, and shipping, and clicks **"Save for later" / "Save as draft"**.
    - **FB Marketplace:** Uploads photos, fills title, buffered local price (+10–15%), condition, description, and location, and clicks **"Save draft"**.
-   - **Craigslist:** Fills local posting flow, uploads images, and parks on the final **"Preview" / "Draft"** tab without publishing.
+   - **Craigslist:** Fills local posting flow, uploads original high-res images, and parks on the final **"Preview" / "Draft"** tab (`https://post.craigslist.org/k/.../preview`) without publishing.
 
 ---
 

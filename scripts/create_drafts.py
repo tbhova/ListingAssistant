@@ -24,6 +24,7 @@ import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -329,139 +330,325 @@ async def create_fbmp_draft(
     return page.url
 
 
+CRAIGSLIST_SUBDOMAIN_TO_POST_CODE: Dict[str, str] = {
+    "sfbay": "sfo",
+    "sfo": "sfo",
+    "sacramento": "sac",
+    "seattle": "sea",
+    "losangeles": "lax",
+    "sandiego": "sdo",
+    "newyork": "nyc",
+    "chicago": "chi",
+    "portland": "pdx",
+    "austin": "aus",
+    "phoenix": "phx",
+    "denver": "den",
+}
+
+
+def match_craigslist_category(category_hint: str, title: str) -> str:
+    """Map eBay category taxonomy and item title to a standard Craigslist category."""
+    cat = (category_hint or "").lower()
+    tit = (title or "").lower()
+
+    # Priority 1: eBay taxonomy mapping
+    if any(k in cat for k in ["lawn mower", "yard, garden", "mower"]):
+        return "farm & garden"
+    if any(k in cat for k in ["cycling", "bicycle"]):
+        return "bicycles"
+    if any(k in cat for k in ["kitchen appliance", "hvac", "major appliance"]):
+        return "appliances"
+    if any(k in cat for k in ["power tool", "tools & workshop", "hand tools"]):
+        return "tools"
+    if any(k in cat for k in ["furniture"]):
+        return "furniture"
+    if any(k in cat for k in ["video game", "consoles"]):
+        return "video gaming"
+    if any(k in cat for k in ["clothing", "shoes", "accessories"]):
+        return "clothing & accessories"
+    if any(k in cat for k in ["automotive tool"]):
+        return "tools"
+    if any(k in cat for k in ["auto parts", "ebay motors"]):
+        return "auto parts"
+
+    # Priority 2: Title keywords (word-boundary matched)
+    title_rules = [
+        (r"\b(mower|lawn|weed|trimmer|chainsaw)\b", "farm & garden"),
+        (r"\b(bike|bicycle|truing|derailleur|cassette)\b", "bicycles"),
+        (r"\b(espresso|cappuccino|coffee|blender|refrigerator|microwave)\b", "appliances"),
+        (r"\b(saw|miter|drill|router|planer|caliper|press|lathe|wrench|socket)\b", "tools"),
+        (r"\b(chair|desk|couch|sofa|table|hall tree|cabinet|dresser)\b", "furniture"),
+        (r"\b(nintendo|switch|playstation|xbox|cockpit|wheelbase|pedals)\b", "video gaming"),
+        (r"\b(boots|shoes|jacket|helmet|gloves|riding)\b", "clothing & accessories"),
+        (r"\b(laptop|desktop|monitor|pc|macbook)\b", "computers"),
+        (r"\b(stereo|speaker|amplifier|receiver)\b", "electronics"),
+    ]
+    for pattern, cl_cat in title_rules:
+        if re.search(pattern, tit):
+            return cl_cat
+
+    return "general for sale"
+
+
+def map_craigslist_condition(condition_str: str) -> str:
+    """Map condition text to Craigslist select value."""
+    c = (condition_str or "").lower()
+    if "brand new" in c or "new with tags" in c or c == "new":
+        return "10"  # new
+    if "like new" in c or "open box" in c:
+        return "20"  # like new
+    if "excellent" in c or "refurbished" in c:
+        return "30"  # excellent
+    if "fair" in c or "for parts" in c:
+        return "50"  # fair
+    return "40"      # good (used default)
+
+
 async def create_craigslist_preview(
     context: Any,
     item: Dict[str, Any],
     dry_run: bool = False,
 ) -> str:
     """
-    Navigate local Craigslist posting flow, fill fields, upload images, and park on the
-    final 'Preview' tab without clicking 'Publish'.
+    Navigate local Craigslist posting flow directly via post.craigslist.org/c/<post_code>,
+    select subarea and neighborhood, select for-sale-by-owner and matched category, fill
+    all form details, upload full-resolution raw photos, and park on the final 'Preview' tab
+    without clicking 'Publish'.
     """
     subdomain = os.getenv("CRAIGSLIST_SUBDOMAIN", "sfbay").strip()
-    cl_area = os.getenv("CRAIGSLIST_AREA", "").strip()
-    cl_city = os.getenv("CRAIGSLIST_CITY", "").strip()
+    post_code = CRAIGSLIST_SUBDOMAIN_TO_POST_CODE.get(subdomain.lower(), subdomain.lower())
+    cl_area = os.getenv("CRAIGSLIST_AREA", "south bay area").strip()
+    cl_city = os.getenv("CRAIGSLIST_CITY", "san jose west").strip()
     origin_zip = os.getenv("ORIGIN_ZIP", "95126").strip()
+
     title = str(item.get("title") or "")[:70]
     cl_price = int(round(float(item.get("craigslist_list_price_usd") or item.get("comp_price") or 25.0)))
     description = str(
         item.get("description_detailed") or item.get("description_concise") or title
     )
-    brand = str(item.get("brand") or "")
-    model_mpn = str(item.get("model_mpn") or "")
-    photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
+    brand = str(item.get("brand") or "")[:30]
+    model_mpn = str(item.get("model_mpn") or "")[:30]
+    condition_str = str(item.get("condition") or "Used")
+    cond_val = map_craigslist_condition(condition_str)
+
+    # Always use original high-resolution raw photos (excluding thumbnails or metadata)
+    photos = sorted(
+        [
+            str(Path(p).resolve())
+            for p in item.get("photos", [])
+            if Path(p).is_file()
+            and not Path(p).name.startswith("thumb_")
+            and Path(p).suffix.lower() in (".jpg", ".jpeg", ".png", ".webp")
+        ],
+        key=lambda x: Path(x).name,
+    )
 
     base_url = f"https://{subdomain}.craigslist.org"
     print(
-        f"  [Craigslist] Preparing preview on {base_url} "
-        f"(area='{cl_area}', city='{cl_city}') for '{title}' (${cl_price})..."
+        f"  [Craigslist] Preparing preview on {base_url} (post_code='{post_code}', "
+        f"area='{cl_area}', city='{cl_city}') for '{title}' (${cl_price})...",
+        flush=True,
     )
     if dry_run:
         return f"{base_url}/?dry_run=true"
 
     page = await context.new_page()
-    await page.goto(f"https://post.craigslist.org/c/{subdomain}", wait_until="domcontentloaded")
+
+    # Direct navigation to post_code avoids the iframe embed and Aberdeen default redirect
+    start_url = f"https://post.craigslist.org/c/{post_code}"
+    await page.goto(start_url, wait_until="domcontentloaded")
     await page.wait_for_timeout(1500)
 
-    # Step 1: Sub-area selection (e.g., "south bay area") and neighborhood selection (e.g., "san jose west")
-    for location_choice in (cl_area, cl_city):
-        try:
-            radios = page.locator("input[type='radio']")
-            if await radios.count() > 0 and await radios.first.is_visible():
-                matched = False
-                if location_choice:
-                    lbl = page.locator(f"label:has-text('{location_choice}')").first
-                    if await lbl.count() > 0 and await lbl.is_visible():
-                        await lbl.click()
-                        matched = True
-                if not matched:
-                    await radios.first.check()
-                await page.locator("button[type='submit'], button:has-text('continue')").first.click()
-                await page.wait_for_timeout(1200)
-        except Exception:
-            pass
-
-    # Step 2: Select "for sale by owner" (fso)
+    # Step 1: Area selection (?s=subarea)
     try:
-        fso_radio = page.locator("input[type='radio'][value='fso'], label:has-text('for sale by owner')").first
-        if await fso_radio.count() > 0 and await fso_radio.is_visible():
-            await fso_radio.click()
+        if "?s=subarea" in page.url or "nearest area" in (await page.title()).lower():
+            area_selected = False
+            if cl_area:
+                loc = page.locator(f"label:has-text('{cl_area}')").first
+                if await loc.count() > 0:
+                    await loc.click()
+                    area_selected = True
+            if not area_selected:
+                sb = page.locator("input[type='radio'][value='2']").first
+                if await sb.count() > 0:
+                    await sb.click()
+                else:
+                    await page.locator("input[type='radio']").first.click()
             await page.locator("button[type='submit'], button:has-text('continue')").first.click()
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(1500)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 1]: {exc}", flush=True)
+
+    # Step 2: Neighborhood selection (?s=hood)
+    try:
+        if "?s=hood" in page.url or "neighborhood" in (await page.title()).lower():
+            hood_selected = False
+            if cl_city:
+                loc = page.locator(f"label:has-text('{cl_city}')").first
+                if await loc.count() > 0:
+                    await loc.click()
+                    hood_selected = True
+            if not hood_selected:
+                sj = page.locator("input[type='radio'][value='40'], label:has-text('san jose west')").first
+                if await sj.count() > 0:
+                    await sj.click()
+                else:
+                    await page.locator("input[type='radio']").first.click()
+            await page.locator("button[type='submit'], button:has-text('continue')").first.click()
+            await page.wait_for_timeout(1500)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 2]: {exc}", flush=True)
+
+    # Step 3: Type of posting (?s=type) -> for sale by owner (fso)
+    try:
+        if "?s=type" in page.url or "choose type" in (await page.title()).lower():
+            fso_radio = page.locator("input[type='radio'][value='fso'], label:has-text('for sale by owner')").first
+            if await fso_radio.count() > 0:
+                await fso_radio.click()
+            await page.locator("button[type='submit'], button:has-text('continue')").first.click()
+            await page.wait_for_timeout(1500)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 3]: {exc}", flush=True)
+
+    # Step 4: Category selection (?s=cat)
+    try:
+        if "?s=cat" in page.url or "choose category" in (await page.title()).lower():
+            target_cat = match_craigslist_category(item.get("category", ""), title)
+            print(f"  [Craigslist] Matched category '{target_cat}'", flush=True)
+            cat_loc = page.locator(f"label:has-text('{target_cat}')").first
+            if await cat_loc.count() > 0:
+                await cat_loc.click()
+            else:
+                gen_loc = page.locator("label:has-text('general for sale')").first
+                if await gen_loc.count() > 0:
+                    await gen_loc.click()
+                else:
+                    await page.locator("input[type='radio']").first.click()
+            await page.locator("button[type='submit'], button:has-text('continue')").first.click()
+            await page.wait_for_timeout(1500)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 4]: {exc}", flush=True)
+
+    # Step 5: Post Details Form (?s=edit)
+    try:
+        title_inp = page.locator("input[name='PostingTitle'], #PostingTitle").first
+        if await title_inp.count() > 0 and await title_inp.is_visible() and await title_inp.is_enabled():
+            await title_inp.fill(title)
     except Exception:
         pass
 
-    # Step 3: Select general category (default to electronics or general for sale if prompted)
-    cat_hint = str(item.get("category") or "general").lower()
-    category_keywords = ["electronics", "tools", "sporting", "household", "general for sale"]
-    selected_cat = False
-    for kw in category_keywords:
-        if kw.split()[0] in cat_hint or kw == "general for sale":
-            loc = page.locator(f"label:has-text('{kw}')").first
-            if await loc.count() > 0 and await loc.is_visible():
-                await loc.click()
-                selected_cat = True
-                break
-    if selected_cat:
-        try:
-            await page.locator("button[type='submit'], button:has-text('continue')").first.click()
-            await page.wait_for_timeout(1500)
-        except Exception:
-            pass
+    try:
+        price_inp = page.locator("input[name='price'], #price").first
+        if await price_inp.count() > 0 and await price_inp.is_visible() and await price_inp.is_enabled():
+            await price_inp.fill(str(cl_price))
+    except Exception:
+        pass
 
-    # Fill Postal Code and City/Neighborhood ("GeographicArea") if present
-    cl_fields = [
-        ("input[name='PostingTitle']", title),
-        ("input[name='price']", str(cl_price)),
-        ("input[name='GeographicArea']", cl_city),
-        ("input[name='postal']", origin_zip),
-        ("textarea[name='PostingBody']", description),
-        ("input[name='sale_manufacturer']", brand if brand != "TBD" else ""),
-        ("input[name='sale_model']", model_mpn if model_mpn != "TBD" else ""),
-    ]
-    for sel, val in cl_fields:
-        if not val:
-            continue
-        try:
-            loc = page.locator(sel).first
-            if await loc.count() > 0 and await loc.is_visible():
-                await loc.fill(val)
-        except Exception:
-            continue
+    try:
+        postal_inp = page.locator("input[name='postal'], #postal_code").first
+        if await postal_inp.count() > 0 and await postal_inp.is_visible() and await postal_inp.is_enabled():
+            await postal_inp.fill(origin_zip)
+    except Exception:
+        pass
 
-    # Continue from text form -> map/location -> image upload
-    for _ in range(2):
-        try:
-            cont_btn = page.locator("button.continue, button[type='submit']:has-text('continue')").first
-            if await cont_btn.count() > 0 and await cont_btn.is_visible():
-                btn_text = (await cont_btn.inner_text() or "").strip()
-                assert_safe_action_label(btn_text)
-                await cont_btn.click()
-                await page.wait_for_timeout(1500)
-        except Exception:
-            break
+    try:
+        city_inp = page.locator("input[name='city']:not([disabled]), input[name='GeographicArea']:not([disabled])").first
+        if await city_inp.count() > 0 and await city_inp.is_visible() and await city_inp.is_enabled():
+            await city_inp.fill(cl_city)
+    except Exception:
+        pass
 
-    # Step 5: Upload photos if on image upload screen
-    if photos:
+    try:
+        body_inp = page.locator("textarea[name='PostingBody'], #PostingBody").first
+        if await body_inp.count() > 0 and await body_inp.is_visible() and await body_inp.is_enabled():
+            await body_inp.fill(description)
+    except Exception:
+        pass
+
+    try:
+        if brand and brand != "TBD":
+            mfg_inp = page.locator("input[name='sale_manufacturer']").first
+            if await mfg_inp.count() > 0 and await mfg_inp.is_visible() and await mfg_inp.is_enabled():
+                await mfg_inp.fill(brand)
+    except Exception:
+        pass
+
+    try:
+        if model_mpn and model_mpn != "TBD":
+            mod_inp = page.locator("input[name='sale_model']").first
+            if await mod_inp.count() > 0 and await mod_inp.is_visible() and await mod_inp.is_enabled():
+                await mod_inp.fill(model_mpn)
+    except Exception:
+        pass
+
+    # Condition dropdown: styled by jQuery UI, select via dispatchEvent
+    try:
+        cond_elem = page.locator("select[name='condition']").first
+        if await cond_elem.count() > 0:
+            await cond_elem.evaluate(
+                f"el => {{ el.value = '{cond_val}'; el.dispatchEvent(new Event('change', {{ bubbles: true }})); }}"
+            )
+    except Exception:
+        pass
+
+    try:
+        cont_btn = page.locator("button[type='submit']:has-text('continue'), button.continue").first
+        if await cont_btn.count() > 0:
+            await cont_btn.click()
+            for _ in range(10):
+                await page.wait_for_timeout(500)
+                if "?s=edit" not in page.url:
+                    break
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 5 submit]: {exc}", flush=True)
+
+    # Step 6: Map / Location Confirmation (?s=geoverify)
+    try:
+        if "?s=geoverify" in page.url or "map" in (await page.title()).lower():
+            map_cont = page.locator("button[type='submit']:has-text('continue'), button.continue").first
+            if await map_cont.count() > 0 and await map_cont.is_visible():
+                btn_txt = (await map_cont.inner_text() or "").strip()
+                assert_safe_action_label(btn_txt)
+                await map_cont.click()
+                for _ in range(10):
+                    await page.wait_for_timeout(500)
+                    if "?s=geoverify" not in page.url:
+                        break
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 6]: {exc}", flush=True)
+
+    # Step 7: Upload Original High-Resolution Raw Photos (?s=editimage)
+    if photos and ("?s=editimage" in page.url or "images" in (await page.title()).lower()):
         try:
             file_input = page.locator("input[type='file']").first
             if await file_input.count() > 0:
-                await file_input.set_input_files(photos[:24])
-                print(f"  [Craigslist] Uploaded {len(photos[:24])} photo(s).")
-                await page.wait_for_timeout(3000)
+                upload_set = photos[:24]
+                print(f"  [Craigslist] Uploading {len(upload_set)} original high-resolution raw photo(s)...", flush=True)
+                await file_input.set_input_files(upload_set)
+                upload_wait_seconds = min(15, 3 + len(upload_set) * 1)
+                await page.wait_for_timeout(upload_wait_seconds * 1000)
         except Exception as exc:
-            print(f"  [Craigslist] Photo upload note: {exc}")
+            print(f"  [Craigslist Photo upload note]: {exc}", flush=True)
 
-    # Click "done with images" to land on final Preview screen — NEVER click "publish"
+    # Step 8: Click "done with images" to land on final Preview screen
     try:
         done_img_btn = page.locator("button:has-text('done with images')").first
         if await done_img_btn.count() > 0 and await done_img_btn.is_visible():
             await done_img_btn.click()
-            await page.wait_for_timeout(1500)
-    except Exception:
-        pass
+            for _ in range(10):
+                await page.wait_for_timeout(500)
+                if "?s=preview" in page.url:
+                    break
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 8]: {exc}", flush=True)
 
-    print(f"  [Craigslist] Parked on final Preview tab (NOT published): {page.url}")
+    # Verify Preview Screen (Hard Safety Rule: NEVER click "publish")
+    publish_btn = page.locator("button:has-text('publish'), input[value='publish']")
+    pub_count = await publish_btn.count()
+    if pub_count > 0:
+        print(f"  [Craigslist Safety Check] 'Publish' button found on screen — strictly parked on Preview (NOT published).", flush=True)
+
+    print(f"  [Craigslist] Successfully parked on final Preview tab: {page.url}", flush=True)
     return page.url
 
 
@@ -470,6 +657,7 @@ async def run_draft_pipeline(
     sku_filter: Optional[str] = None,
     platform_filter: Optional[str] = None,
     dry_run: bool = False,
+    overwrite: bool = False,
 ) -> int:
     """Connect to Chrome CDP on port 9222 and create drafts for all eligible items in manifest."""
     if not manifest_path.exists():
@@ -523,9 +711,23 @@ async def run_draft_pipeline(
             run_fbmp = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "fbmp")
             run_cl = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "craigslist")
 
-            needs_ebay = run_ebay and not item.get("ebay_draft_url")
-            needs_fbmp = run_fbmp and not item.get("fbmp_listing_url")
-            needs_cl = run_cl and not item.get("craigslist_edit_url")
+            cl_url = item.get("craigslist_edit_url") or ""
+            is_cl_incomplete = (
+                not cl_url
+                or "dry_run" in cl_url
+                or "s=type" in cl_url
+                or "s=subarea" in cl_url
+                or "s=hood" in cl_url
+                or "s=cat" in cl_url
+                or "s=edit" in cl_url
+                or "s=geoverify" in cl_url
+                or "s=editimage" in cl_url
+                or "aberdeen" in cl_url.lower()
+            )
+
+            needs_ebay = run_ebay and (overwrite or not item.get("ebay_draft_url"))
+            needs_fbmp = run_fbmp and (overwrite or not item.get("fbmp_listing_url"))
+            needs_cl = run_cl and (overwrite or is_cl_incomplete)
 
             if not (needs_ebay or needs_fbmp or needs_cl) and not sku_filter:
                 print(f"[SKIP] {sku} ({item.get('item_id')}) already has all required drafts created.", flush=True)
@@ -597,6 +799,11 @@ def main() -> int:
         help="Optional single platform filter",
     )
     parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Regenerate drafts even if a draft URL is already recorded",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Simulate draft creation and verify routing without launching browser clicks",
@@ -609,6 +816,7 @@ def main() -> int:
             sku_filter=args.sku,
             platform_filter=args.platform,
             dry_run=args.dry_run,
+            overwrite=args.overwrite,
         )
     )
 
