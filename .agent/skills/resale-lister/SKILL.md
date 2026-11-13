@@ -158,7 +158,7 @@ Only execute Stage 4 **after** the user explicitly approves the review queue fro
    - **FB Marketplace:** Uploads photos, fills title, buffered local price (+10–15%), condition, description, and location, and clicks **"Save draft"**.
    - **Craigslist:** Fills local posting flow, uploads original high-res images, and parks on the final **"Preview" / "Draft"** tab (`https://post.craigslist.org/k/.../preview`) without publishing.
 4. **Revising Existing Drafts or Live Listings (`scripts/manage_listings.py`):**
-   Use `.venv\Scripts\python.exe scripts/manage_listings.py --sku <SKUs> --platform ebay --fields price,shipping` (supports `price,shipping,title,quantity,description,photos`) to update existing drafts (`Save for later`) or already-published live listings (`mode=ReviseItem` -> `Revise it`) **in-place** without creating duplicate drafts.
+   Use `.venv\Scripts\python.exe scripts/manage_listings.py --sku <SKUs> --platform ebay|fbmp|craigslist|all --fields price,shipping` (supports `price,shipping,title,quantity,description,photos`) to update existing drafts (`Save for later` / `Save draft`) or already-published live listings (`Revise it` / `Update` / `publish`) **in-place** without creating duplicate drafts.
 
 ---
 
