@@ -461,7 +461,7 @@ async def create_fbmp_draft(
         try:
             file_input = page.locator("input[type='file'][accept*='image']").first
             if await file_input.count() > 0:
-                await file_input.set_input_files(photos[:20])
+                await file_input.set_input_files(photos[:20], timeout=90000)
                 print(f"  [FBMP] Uploaded {len(photos[:20])} photo(s).")
                 await page.wait_for_timeout(3000)
         except Exception as exc:
@@ -547,19 +547,37 @@ async def create_fbmp_draft(
         except Exception as exc:
             print(f"  [FBMP] Delivery step note: {exc}")
 
-    # Click "Save draft" — NEVER click "Publish"
-    await safe_click_draft_button(
-        page,
-        selectors=[
-            "div[aria-label='Save draft']",
-            "div[role='button']:has-text('Save draft')",
-            "button:has-text('Save draft')",
-            "span:has-text('Save draft')",
-        ],
-        platform_name="FBMP",
-    )
-    await page.wait_for_timeout(3000)
-    return page.url
+    # Click "Save draft" with exponential backoff on FBMP "Something went wrong" rate-limit modal
+    backoff_delays = [10, 25, 60]
+    for attempt in range(len(backoff_delays) + 1):
+        await safe_click_draft_button(
+            page,
+            selectors=[
+                "div[aria-label='Save draft']",
+                "div[role='button']:has-text('Save draft')",
+                "button:has-text('Save draft')",
+                "span:has-text('Save draft')",
+            ],
+            platform_name="FBMP",
+        )
+        await page.wait_for_timeout(4500)
+        err_dlg = page.locator("[role='dialog']:has-text('Something went wrong')").first
+        if await err_dlg.count() > 0 and await err_dlg.is_visible():
+            close_btn = err_dlg.locator("[role='button']:has-text('Close'), button:has-text('Close'), [aria-label='Close']").first
+            if await close_btn.count() > 0:
+                await close_btn.click()
+                await page.wait_for_timeout(500)
+            if attempt < len(backoff_delays):
+                wait_s = backoff_delays[attempt]
+                print(f"  [FBMP] 'Something went wrong' modal detected; backing off {wait_s}s (attempt {attempt + 1}/{len(backoff_delays)})...", flush=True)
+                await page.wait_for_timeout(wait_s * 1000)
+                continue
+            print("  [FBMP] Warning: 'Something went wrong' persisted after retries.", flush=True)
+        break
+
+    final_url = page.url
+    await page.close()
+    return final_url
 
 
 CRAIGSLIST_SUBDOMAIN_TO_POST_CODE: Dict[str, str] = {
