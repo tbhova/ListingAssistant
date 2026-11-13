@@ -177,17 +177,35 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     local_max_side = float(os.getenv("LOCAL_ONLY_MAX_SIDE_IN", "24.0"))
     local_max_ship_ratio = float(os.getenv("LOCAL_ONLY_MAX_SHIPPING_RATIO", "0.40"))
     value_score_cap = float(os.getenv("VALUE_SCORE_CAP_DOLLARS", "200.0"))
+    ebay_free_shipping_max_lbs = float(os.getenv("EBAY_FREE_SHIPPING_MAX_LBS", "10.0"))
 
     comp_price = max(0.0, float(item_data.get("comp_price", 0.0)))
+    lowest_comp_with_shipping = max(
+        0.0, float(item_data.get("lowest_comp_with_shipping_usd") or comp_price)
+    )
     weight_lbs = max(0.1, float(item_data.get("weight_lbs", 1.0)))
     dims = item_data.get("dimensions_in") or [10.0, 8.0, 6.0]
     max_side = max(float(d) for d in dims) if dims else 10.0
 
     shipping_info = calculate_zone8_shipping(weight_lbs, dims, origin_zip=origin_zip)
     est_shipping = shipping_info["estimated_shipping_usd"]
+    ebay_free_shipping = (
+        bool(item_data["ebay_free_shipping"])
+        if "ebay_free_shipping" in item_data
+        else (weight_lbs < ebay_free_shipping_max_lbs)
+    )
 
-    ebay_fees = round((comp_price * ebay_fee_pct) + ebay_fixed_fee, 2) if comp_price > 0 else 0.0
-    net_profit = round(comp_price - est_shipping - ebay_fees, 2)
+    if lowest_comp_with_shipping > 0:
+        if ebay_free_shipping:
+            ebay_list_price = round(max(0.99, lowest_comp_with_shipping - 0.01), 2)
+        else:
+            ebay_list_price = round(max(0.99, lowest_comp_with_shipping - est_shipping - 0.01), 2)
+    else:
+        ebay_list_price = 0.0
+
+    landed_ebay_revenue = (ebay_list_price if ebay_free_shipping else ebay_list_price + est_shipping)
+    ebay_fees = round((landed_ebay_revenue * ebay_fee_pct) + ebay_fixed_fee, 2) if landed_ebay_revenue > 0 else 0.0
+    net_profit = round(landed_ebay_revenue - est_shipping - ebay_fees, 2)
 
     # Local pickup pricing: FBMP includes +10-15% negotiation buffer; Craigslist uses target price
     raw_fbmp_price = comp_price * (1.0 + fbmp_buffer)
@@ -251,7 +269,9 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
             "shipping": shipping_info,
             "ebay_fees_usd": ebay_fees,
             "estimated_net_profit_usd": net_profit,
-            "ebay_list_price_usd": round(comp_price, 2),
+            "lowest_comp_with_shipping_usd": round(lowest_comp_with_shipping, 2),
+            "ebay_free_shipping": ebay_free_shipping,
+            "ebay_list_price_usd": ebay_list_price,
             "fbmp_list_price_usd": fbmp_list_price,
             "craigslist_list_price_usd": craigslist_list_price,
             "routing_bucket": routing_bucket,

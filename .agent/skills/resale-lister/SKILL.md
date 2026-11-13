@@ -89,7 +89,8 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
      - `accessories`: List of included cables, remotes, manuals, batteries, or accessories visible in photos.
      - `weight_lbs`: Estimated packaged shipping weight in pounds (float).
      - `dimensions_in`: Estimated packaged box dimensions `[Length, Width, Height]` in inches.
-     - `comp_price`: Estimated eBay sold comparable price in USD (float).
+     - `comp_price`: Lowest eBay sold/active comparable **total landed price including shipping** (`item + shipping`) in USD (float). When estimating shipping for comps or our own listings, use `max(local_shipping, NYC/Zone 8 shipping)` (conservative coast-to-coast rate).
+     - `lowest_comp_with_shipping_usd`: Optional explicit lowest comparable landed price (`item + shipping`) in USD (float); defaults to `comp_price`.
      - `quantity`: Available inventory count (integer, default 1). If > 1, reflected in eBay multi-quantity inventory and listing copy.
      - `uncertainty_score`: Integer `0–100` indicating how uncertain you are about model ID, working condition, completeness, or comp value.
      - `grill_questions`: Array of specific clarifying questions for the user (e.g., `"Photo 3 shows the back label slightly blurred—what is the exact serial/model suffix?"`, `"Does this unit power on and pass audio testing?"`).
@@ -101,9 +102,12 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
    .venv\Scripts\python.exe scripts/analyze_items.py --calculate
    ```
    This script computes:
-   - **Conservative Zone 8 Shipping** from `ORIGIN_ZIP` (accounting for both actual weight and USPS/UPS dimensional weight `(L*W*H)/166` & `/139`).
-   - **eBay Fees:** `(Comp Price * 13.5%) + $0.40`.
-   - **Estimated Net Profit:** `Comp Price - Est. Zone 8 Shipping - eBay Fees`.
+   - **Conservative Shipping (`max(local, NYC/Zone 8)`):** Zone 8 coast-to-coast shipping from `ORIGIN_ZIP` (accounting for both actual weight and USPS/UPS dimensional weight `(L*W*H)/166` & `/139`), which bounds both local and NYC rates.
+   - **eBay Free Shipping (< 10 lbs) & Penny-Under Pricing:**
+     - Items under `10 lbs` (`weight_lbs < 10.0`) default to **Free Shipping on eBay** (`ebay_free_shipping: true`), priced at `lowest_comp_with_shipping - $0.01` (1 penny under the lowest comp with shipping).
+     - Items `>= 10 lbs` default to buyer-paid shipping (`ebay_free_shipping: false`), priced at `lowest_comp_with_shipping - est_shipping - $0.01` so total landed price stays 1 penny under the lowest comp.
+   - **eBay Fees:** `(Landed Comp Price * 13.5%) + $0.40`.
+   - **Estimated Net Profit:** `Landed Comp Price - Est. Zone 8 Shipping - eBay Fees`.
    - **FBMP Price with Negotiation Buffer:** `Comp Price * (1 + FBMP_NEGOTIATION_BUFFER)` rounded cleanly.
    - **Routing Buckets:**
      1. `LOCAL_ONLY` (Craigslist + FB Marketplace): Heavy/bulky items (`weight > 20 lbs`, `longest side > 24"`, or `shipping > 40% of comp`) where `Comp Price >= $20`.

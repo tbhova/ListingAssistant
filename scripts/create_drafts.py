@@ -331,12 +331,17 @@ async def create_ebay_draft(
             print(f"  [eBay] Set Buy It Now price to: ${price:.2f}", flush=True)
             break
 
-    # 7. Package Weight & Dimensions
+    # 7. Package Weight, Dimensions & Free Shipping (< 10 lbs)
     shipping = item.get("shipping") or {}
-    weight_lbs = int(float(shipping.get("actual_weight_lbs") or 1))
+    weight_lbs = float(shipping.get("actual_weight_lbs") or item.get("weight_lbs") or 1.0)
+    ebay_free_shipping = (
+        bool(item["ebay_free_shipping"])
+        if "ebay_free_shipping" in item
+        else (weight_lbs < 10.0)
+    )
     dims = shipping.get("dimensions_in") or [12, 9, 4]
     field_pairs = [
-        ("input[aria-label*='Weight in pounds'], input[name*='majorWeight']", str(max(1, weight_lbs))),
+        ("input[aria-label*='Weight in pounds'], input[name*='majorWeight']", str(max(1, int(round(weight_lbs))))),
         ("input[aria-label*='Length'], input[name*='packageLength']", str(int(dims[0]))),
         ("input[aria-label*='Width'], input[name*='packageWidth']", str(int(dims[1]))),
         ("input[aria-label*='Depth'], input[aria-label*='Height'], input[name*='packageDepth']", str(int(dims[2]))),
@@ -348,6 +353,22 @@ async def create_ebay_draft(
                 await loc.fill(val)
         except Exception:
             pass
+
+    if ebay_free_shipping:
+        for sel in (
+            "input[type='checkbox'][aria-label*='Free shipping']",
+            "label:has-text('Free shipping') input[type='checkbox']",
+            "input[name*='freeShipping']",
+        ):
+            try:
+                cb = page.locator(sel).first
+                if await cb.count() > 0 and await cb.is_visible():
+                    if not await cb.is_checked():
+                        await cb.check()
+                    print("  [eBay] Enabled Free shipping (< 10 lbs).", flush=True)
+                    break
+            except Exception:
+                continue
 
     # Step 8: Click "Save for later" / "Save as draft" — NEVER click "List it"
     await safe_click_draft_button(
