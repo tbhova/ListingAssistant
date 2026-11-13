@@ -372,6 +372,36 @@ async def create_ebay_draft(
     return final_url
 
 
+def _map_fbmp_category(item: Dict[str, Any], prefer_shipping: bool = False) -> str:
+    """Map item metadata to a Facebook Marketplace category (preferring shipping-eligible ones)."""
+    text = f"{item.get('category', '')} {item.get('title', '')}".lower()
+    if any(k in text for k in ("auto", "ford", "powersports", "helmet", "visor", "brake", "motor", "battery", "f-150", "car")):
+        return "Auto parts"
+    if any(k in text for k in ("tool", "saw", "pump", "mityvac", "bleeder", "drill", "wrench", "truing")):
+        return "Tools"
+    if any(k in text for k in ("sport", "outdoor", "bicycle", "bike", "golf", "fitness")):
+        return "Sports & Outdoors"
+    if any(k in text for k in ("electronic", "computer", "camera", "audio", "monitor", "speaker")):
+        return "Electronics & computers"
+    if any(k in text for k in ("furniture", "chair", "aeron", "headrest", "office", "household", "kitchen", "appliance", "coffee")):
+        return "Household"
+    return "Household" if prefer_shipping else "Miscellaneous"
+
+
+def _map_fbmp_condition(condition: str) -> str:
+    """Map inventory condition string to Facebook Marketplace's Condition dropdown options."""
+    c = (condition or "").strip().lower()
+    if c == "new" or c.startswith("new "):
+        return "New"
+    if "like new" in c or "open box" in c:
+        return "Used - Like New"
+    if "very good" in c or "good" in c:
+        return "Used - Good"
+    if "fair" in c or "parts" in c:
+        return "Used - Fair"
+    return "Used - Good"
+
+
 async def create_fbmp_draft(
     context: Any,
     item: Dict[str, Any],
@@ -380,7 +410,8 @@ async def create_fbmp_draft(
     """
     Create a Facebook Marketplace item draft (patterns adapted from
     NmediaCloud/marketplace-listing-assistant & Haron1-max/Facebook-Marketplace-Auto-Poster).
-    Applies +10-15% negotiation buffer price and clicks 'Save draft'.
+    Applies +10-15% negotiation buffer price, selects Category/Condition,
+    advances to Delivery step for shipping+pickup items, and clicks 'Save draft'.
     """
     title = str(item.get("title") or "")[:80]
     fb_price = int(round(float(item.get("fbmp_list_price_usd") or item.get("comp_price") or 25.0)))
@@ -389,14 +420,20 @@ async def create_fbmp_draft(
     )
     origin_zip = os.getenv("ORIGIN_ZIP", "98101")
     photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
+    wants_shipping = bool(item.get("fbmp_shipping_and_pickup")) or item.get("routing_bucket") in ("EBAY_ONLY", "EBAY_AND_FBMP")
+    fb_category = _map_fbmp_category(item, prefer_shipping=wants_shipping)
+    fb_condition = _map_fbmp_condition(str(item.get("condition") or ""))
 
-    print(f"  [FBMP] Preparing draft for '{title}' (${fb_price} w/ negotiation buffer, {len(photos)} photo(s))...")
+    print(
+        f"  [FBMP] Preparing draft for '{title}' (${fb_price}, cat='{fb_category}', "
+        f"cond='{fb_condition}', shipping+pickup={wants_shipping}, {len(photos)} photo(s))..."
+    )
     if dry_run:
         return "https://www.facebook.com/marketplace/you/selling?dry_run=true"
 
     page = await context.new_page()
     await page.goto("https://www.facebook.com/marketplace/create/item", wait_until="domcontentloaded")
-    await page.wait_for_timeout(3000)
+    await page.wait_for_timeout(3500)
 
     # Upload photos via file input
     if photos:
@@ -405,11 +442,11 @@ async def create_fbmp_draft(
             if await file_input.count() > 0:
                 await file_input.set_input_files(photos[:20])
                 print(f"  [FBMP] Uploaded {len(photos[:20])} photo(s).")
-                await page.wait_for_timeout(2500)
+                await page.wait_for_timeout(3000)
         except Exception as exc:
             print(f"  [FBMP] Photo upload note: {exc}")
 
-    # Fill Title, Price, Description, and Location using resilient aria/label selectors
+    # Fill Title, Price, and Description using resilient aria/label selectors
     label_fields = [
         ("label:has-text('Title') input", title),
         ("input[aria-label='Title']", title),
@@ -417,29 +454,90 @@ async def create_fbmp_draft(
         ("input[aria-label='Price']", str(fb_price)),
         ("label:has-text('Description') textarea", description),
         ("textarea[aria-label='Description']", description),
-        ("label:has-text('Location') input", origin_zip),
-        ("input[aria-label='Location']", origin_zip),
     ]
     for sel, val in label_fields:
         try:
             loc = page.locator(sel).first
             if await loc.count() > 0 and await loc.is_visible():
                 await loc.fill(val)
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(350)
         except Exception:
             continue
+
+    # Select Category
+    try:
+        cat_lbl = page.locator("label:has-text('Category')").first
+        if await cat_lbl.count() > 0 and await cat_lbl.is_visible():
+            await cat_lbl.click()
+            await page.wait_for_timeout(1200)
+            cat_opt = page.locator(
+                f"[role='menuitem']:has-text('{fb_category}'), "
+                f"[role='option']:has-text('{fb_category}'), "
+                f"span:text-is('{fb_category}')"
+            ).first
+            if await cat_opt.count() > 0 and await cat_opt.is_visible():
+                await cat_opt.click()
+                print(f"  [FBMP] Selected category: {fb_category}")
+                await page.wait_for_timeout(800)
+    except Exception as exc:
+        print(f"  [FBMP] Category selection note: {exc}")
+
+    # Select Condition
+    try:
+        cond_lbl = page.locator("label:has-text('Condition')").first
+        if await cond_lbl.count() > 0 and await cond_lbl.is_visible():
+            await cond_lbl.click()
+            await page.wait_for_timeout(1000)
+            cond_opt = page.locator(
+                f"[role='option']:has-text('{fb_condition}'), "
+                f"[role='menuitem']:has-text('{fb_condition}'), "
+                f"span:text-is('{fb_condition}')"
+            ).first
+            if await cond_opt.count() > 0 and await cond_opt.is_visible():
+                await cond_opt.click()
+                print(f"  [FBMP] Selected condition: {fb_condition}")
+                await page.wait_for_timeout(800)
+    except Exception as exc:
+        print(f"  [FBMP] Condition selection note: {exc}")
+
+    # Fill Location if visible on Step 1
+    for sel in ("label:has-text('Location') input", "input[aria-label='Location']"):
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible():
+                await loc.fill(origin_zip)
+                await page.wait_for_timeout(400)
+                break
+        except Exception:
+            continue
+
+    # For shipping + local pickup items, advance to Step 2 (?step=delivery)
+    if wants_shipping:
+        try:
+            next_btn = page.locator("div[aria-label='Next'], button:has-text('Next')").first
+            if await next_btn.count() > 0 and await next_btn.is_visible():
+                disabled = await next_btn.get_attribute("aria-disabled")
+                if disabled != "true":
+                    await next_btn.click()
+                    await page.wait_for_timeout(3000)
+                    print(f"  [FBMP] Advanced to delivery step: {page.url}")
+                else:
+                    print("  [FBMP] Next button disabled; saving draft from Step 1.")
+        except Exception as exc:
+            print(f"  [FBMP] Delivery step note: {exc}")
 
     # Click "Save draft" — NEVER click "Publish"
     await safe_click_draft_button(
         page,
         selectors=[
+            "div[aria-label='Save draft']",
             "div[role='button']:has-text('Save draft')",
             "button:has-text('Save draft')",
             "span:has-text('Save draft')",
         ],
         platform_name="FBMP",
     )
-    await page.wait_for_timeout(2000)
+    await page.wait_for_timeout(3000)
     return page.url
 
 
@@ -820,8 +918,11 @@ async def run_draft_pipeline(
             print("-" * 72)
             print(f"Processing {sku} ({item.get('item_id')}) | Bucket: {bucket} | Title: {item.get('title')}")
 
-            run_ebay = bucket in ("ALL_THREE", "EBAY_ONLY") and platform_filter in (None, "ebay")
-            run_fbmp = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "fbmp")
+            run_ebay = bucket in ("ALL_THREE", "EBAY_ONLY", "EBAY_AND_FBMP") and platform_filter in (None, "ebay")
+            run_fbmp = (
+                bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_AND_FBMP")
+                or bool(item.get("fbmp_shipping_and_pickup"))
+            ) and platform_filter in (None, "fbmp")
             run_cl = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "craigslist")
 
             cl_url = item.get("craigslist_edit_url") or ""
