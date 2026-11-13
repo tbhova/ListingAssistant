@@ -404,9 +404,27 @@ def _map_fbmp_category(item: Dict[str, Any], prefer_shipping: bool = False) -> s
         return "Sports & Outdoors"
     if any(k in text for k in ("electronic", "computer", "camera", "audio", "monitor", "speaker")):
         return "Electronics & computers"
-    if any(k in text for k in ("furniture", "chair", "aeron", "headrest", "office", "household", "kitchen", "appliance", "coffee")):
+    if any(k in text for k in ("furniture", "chair", "aeron", "desk", "table", "sofa")):
+        return "Household" if prefer_shipping else "Furniture"
+    if any(k in text for k in ("headrest", "office", "household", "kitchen", "appliance", "coffee")):
         return "Household"
     return "Household" if prefer_shipping else "Miscellaneous"
+
+
+def _fbmp_weight_tier(weight_lbs: float) -> str:
+    """Map item weight in lbs to Facebook Marketplace's prepaid label weight tier."""
+    w = max(0.1, float(weight_lbs or 1.0))
+    for limit, label in (
+        (0.5, "Under 0.5 lbs"),
+        (1.0, "0.5-1 lbs"),
+        (2.0, "1-2 lbs"),
+        (5.0, "2-5 lbs"),
+        (10.0, "5-10 lbs"),
+        (70.0, "10-70 lbs"),
+    ):
+        if w <= limit:
+            return label
+    return "10-70 lbs"
 
 
 def _map_fbmp_condition(condition: str) -> str:
@@ -542,6 +560,52 @@ async def create_fbmp_draft(
                     await next_btn.click()
                     await page.wait_for_timeout(3000)
                     print(f"  [FBMP] Advanced to delivery step: {page.url}")
+
+                    # Select shipping label (Package weight + Shipping carrier)
+                    lbl_btn = page.locator("[role='main'] [role='button']:has-text('Select shipping label')").first
+                    if await lbl_btn.count() > 0 and await lbl_btn.is_visible():
+                        await lbl_btn.click()
+                        await page.wait_for_timeout(1500)
+                        dlg = page.locator("[role='dialog']").last
+                        weight_lbs = float(
+                            (item.get("shipping") or {}).get("actual_weight_lbs")
+                            or item.get("weight_lbs")
+                            or 1.0
+                        )
+                        tier_label = _fbmp_weight_tier(weight_lbs)
+                        pw = dlg.locator("label:has-text('Package weight')").first
+                        if await pw.count() > 0:
+                            await pw.click()
+                            await page.wait_for_timeout(1000)
+                            pw_opt = page.locator(
+                                f"[role='option']:has-text('{tier_label}'), "
+                                f"[role='menuitem']:has-text('{tier_label}'), "
+                                f"span:text-is('{tier_label}')"
+                            ).first
+                            if await pw_opt.count() > 0 and await pw_opt.is_visible():
+                                await pw_opt.click()
+                                await page.wait_for_timeout(800)
+                                print(f"  [FBMP] Selected package weight: {tier_label}")
+
+                        sc = dlg.locator("label:has-text('Shipping carrier')").first
+                        if await sc.count() > 0:
+                            await sc.click()
+                            await page.wait_for_timeout(1000)
+                            sc_opt = page.locator(
+                                "[role='option']:has-text('USPS'), [role='menuitem']:has-text('USPS'), "
+                                "[role='option'], [role='menuitem']"
+                            ).first
+                            if await sc_opt.count() > 0 and await sc_opt.is_visible():
+                                carrier_txt = (await sc_opt.inner_text() or "").strip().replace("\n", " ")
+                                await sc_opt.click()
+                                await page.wait_for_timeout(800)
+                                print(f"  [FBMP] Selected shipping carrier: {carrier_txt}")
+
+                        upd_btn = dlg.locator("div[aria-label='Update'], div[role='button']:has-text('Update')").first
+                        if await upd_btn.count() > 0 and await upd_btn.is_visible():
+                            await upd_btn.click()
+                            await page.wait_for_timeout(1500)
+                            print("  [FBMP] Updated shipping label modal.")
                 else:
                     print("  [FBMP] Next button disabled; saving draft from Step 1.")
         except Exception as exc:
