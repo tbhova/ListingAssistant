@@ -709,9 +709,29 @@ async def create_craigslist_preview(
     await page.goto(start_url, wait_until="domcontentloaded")
     await page.wait_for_timeout(1500)
 
-    # Step 1: Area selection (?s=subarea)
+    # Step 0: Handle "?s=copyfromanother" ("Re-use selected data from your previous posting?")
     try:
-        if "?s=subarea" in page.url or "nearest area" in (await page.title()).lower():
+        if "?s=copyfromanother" in page.url or "copy from previous" in (await page.title()).lower():
+            skip_btn = page.locator("button:has-text('skip'), input[value='skip'], a:has-text('skip')").first
+            if await skip_btn.count() > 0 and await skip_btn.is_visible():
+                await skip_btn.click()
+                await page.wait_for_timeout(1500)
+                print("  [Craigslist] Skipped 'copy from previous posting' prompt.", flush=True)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 0]: {exc}", flush=True)
+
+    # Step 0b: Top-level city/area confirmation (?s=area) -> already defaults to post_code, click continue
+    try:
+        if "?s=area" in page.url or "choose area" in (await page.title()).lower():
+            await page.locator("button[type='submit'], button:has-text('continue')").first.click()
+            await page.wait_for_timeout(1500)
+    except Exception as exc:
+        print(f"  [Craigslist Note - Step 0b]: {exc}", flush=True)
+
+    # Step 1: Sub-area selection (?s=subarea)
+    try:
+        cur_title = (await page.title()).lower()
+        if "?s=subarea" in page.url or "nearest area" in cur_title:
             area_selected = False
             if cl_area:
                 loc = page.locator(f"label:has-text('{cl_area}')").first
@@ -779,13 +799,14 @@ async def create_craigslist_preview(
     except Exception as exc:
         print(f"  [Craigslist Note - Step 4]: {exc}", flush=True)
 
-    # Step 5: Post Details Form (?s=edit)
+    # Step 5: Post Details Form (?s=edit) — wait explicitly for form to load
+    await page.wait_for_selector("input[name='PostingTitle'], #PostingTitle", timeout=15000)
     try:
         title_inp = page.locator("input[name='PostingTitle'], #PostingTitle").first
         if await title_inp.count() > 0 and await title_inp.is_visible() and await title_inp.is_enabled():
             await title_inp.fill(title)
-    except Exception:
-        pass
+    except Exception as exc:
+        print(f"  [Craigslist Note - Title]: {exc}", flush=True)
 
     try:
         price_inp = page.locator("input[name='price'], #price").first
@@ -895,9 +916,15 @@ async def create_craigslist_preview(
     # Verify Preview Screen (Hard Safety Rule: NEVER click "publish")
     publish_btn = page.locator("button:has-text('publish'), input[value='publish']")
     pub_count = await publish_btn.count()
-    if pub_count > 0:
-        print(f"  [Craigslist Safety Check] 'Publish' button found on screen — strictly parked on Preview (NOT published).", flush=True)
+    if "?s=preview" not in page.url or pub_count == 0:
+        raise RuntimeError(
+            f"Craigslist draft did not reach Preview screen (landed on {page.url}, publish_btn={pub_count})."
+        )
 
+    print(
+        f"  [Craigslist Safety Check] 'Publish' button found on screen — strictly parked on Preview (NOT published).",
+        flush=True,
+    )
     print(f"  [Craigslist] Successfully parked on final Preview tab: {page.url}", flush=True)
     return page.url
 
