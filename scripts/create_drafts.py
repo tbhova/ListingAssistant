@@ -89,12 +89,15 @@ async def create_ebay_draft(
     dry_run: bool = False,
 ) -> str:
     """
-    Create an eBay Seller Hub draft listing (patterns adapted from ashnicholes-droid/hahm-ebay-lister).
-    Never clicks 'List it' — only clicks 'Save for later' (or leaves open on draft editor).
-    Returns the draft URL.
+    Create or update an eBay Seller Hub draft listing with full SPA lifecycle support.
+    Uploads high-resolution raw photos, populates rich-text description iframe,
+    sets eBay quantity schema field, sets Buy It Now price and shipping dimensions,
+    and clicks 'Save for later' (strictly enforcing the Hard Safety Rule: NEVER 'List it').
+    Returns the canonical resume URL: https://www.ebay.com/sl/list?mode=AddItem&draft_id=<ID>.
     """
     title = str(item.get("title") or "")[:80]
     price = float(item.get("ebay_list_price_usd") or item.get("comp_price") or 25.0)
+    quantity = int(item.get("quantity") or 1)
     description = str(
         item.get("description_detailed") or item.get("description_concise") or title
     )
@@ -103,81 +106,127 @@ async def create_ebay_draft(
     condition_str = str(item.get("condition") or "Used - Good").lower()
     photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
 
-    print(f"  [eBay] Preparing draft for '{title}' (${price:.2f}, {len(photos)} photo(s))...")
+    print(f"  [eBay] Preparing draft for '{title}' (${price:.2f}, qty: {quantity}, {len(photos)} photo(s))...", flush=True)
     if dry_run:
         return "https://www.ebay.com/sh/lst/drafts?dry_run=true"
 
     page = await context.new_page()
-    await page.goto("https://www.ebay.com/sl/prelist/suggest", wait_until="domcontentloaded")
-    await page.wait_for_timeout(2000)
 
-    # Step 1: Prelist search box ("Tell us what you're selling")
-    search_selectors = [
-        "input[placeholder*='Tell us what you']",
-        "input[name='keyword']",
-        "input[type='text']",
-    ]
-    for sel in search_selectors:
-        loc = page.locator(sel).first
-        if await loc.count() > 0 and await loc.is_visible():
-            await loc.fill(title)
-            await loc.press("Enter")
-            await page.wait_for_timeout(2500)
-            break
+    # Known existing draft IDs map for current batch
+    known_draft_ids: Dict[str, str] = {
+        "item_02": "5315475130221",
+        "item_07": "5315015828220",
+        "item_08": "5314715942522",
+        "item_16": "5314106230823",
+        "item_12": "5314099107923",
+        "item_03": "5319856841422",
+        "item_10": "5320147259120",
+    }
 
-    # Step 2: Click "Continue without match" if product catalog prompt appears
-    continue_without_match = [
-        "button:has-text('Continue without match')",
-        "a:has-text('Continue without match')",
-        "button:has-text('Skip')",
-    ]
-    for sel in continue_without_match:
+    # Check if item has a known or existing draft_id
+    existing_url = item.get("ebay_draft_url") or ""
+    draft_id_match = re.search(r"draft_?id=(\d+)", existing_url, re.IGNORECASE)
+    draft_id = draft_id_match.group(1) if draft_id_match else known_draft_ids.get(item.get("item_id", ""))
+
+    editor_mounted = False
+
+    if draft_id:
+        resume_url = f"https://www.ebay.com/sl/list?mode=AddItem&draft_id={draft_id}"
+        print(f"  [eBay] Opening existing draft ID {draft_id}: {resume_url} ...", flush=True)
         try:
+            await page.goto(resume_url, wait_until="domcontentloaded")
+            await page.wait_for_selector("input#fehelix-uploader, input[type='file']", state="attached", timeout=30000)
+            editor_mounted = True
+            print("  [eBay] Existing draft editor loaded successfully.", flush=True)
+        except Exception as exc:
+            print(f"  [eBay] Could not open existing draft directly ({exc}), falling back to prelist creation...", flush=True)
+            editor_mounted = False
+
+    if not editor_mounted:
+        # Create fresh draft via prelist suggest
+        await page.goto("https://www.ebay.com/sl/prelist/suggest", wait_until="domcontentloaded")
+        await page.wait_for_timeout(2000)
+
+        # Step 1: Search box
+        search_selectors = [
+            "input[placeholder*='Tell us what you']",
+            "input[name='keyword']",
+            "input[type='text']",
+        ]
+        for sel in search_selectors:
             loc = page.locator(sel).first
             if await loc.count() > 0 and await loc.is_visible():
-                for _ in range(10):
-                    if await loc.is_enabled():
-                        await loc.click(timeout=3000)
-                        await page.wait_for_timeout(2000)
-                        break
-                    await page.wait_for_timeout(500)
-                break
-        except Exception as exc:
-            print(f"  [eBay] Prelist catalog match note: {exc}")
-
-    # Step 3: Condition selection modal if prompted before form
-    if "new" in condition_str and "like" not in condition_str:
-        cond_choice = "New"
-    elif "parts" in condition_str:
-        cond_choice = "For parts or not working"
-    else:
-        cond_choice = "Used"
-
-    for sel in [
-        f"label:has-text('{cond_choice}')",
-        f"button:has-text('{cond_choice}')",
-        "button:has-text('Continue to listing')",
-    ]:
-        loc = page.locator(sel).first
-        if await loc.count() > 0 and await loc.is_visible():
-            try:
-                await loc.click(timeout=2000)
-                await page.wait_for_timeout(1000)
-            except Exception:
-                pass
-
-    # Step 4: Upload photos via input[type="file"]
-    if photos:
-        try:
-            file_input = page.locator("input[type='file']").first
-            if await file_input.count() > 0:
-                await file_input.set_input_files(photos[:24])
-                print(f"  [eBay] Uploaded {len(photos[:24])} photo(s).")
+                await loc.fill(title)
+                await loc.press("Enter")
                 await page.wait_for_timeout(3000)
-        except Exception as exc:
-            print(f"  [eBay] Photo upload note: {exc}")
+                break
 
-    # Step 5: Fill Title, Brand/MPN specifics, Description, Price, and Package Weight/Dimensions
+        # Step 2: Category selection on identify page if prompted
+        try:
+            cat_btn = page.locator("button.se-field-card__body").first
+            if await cat_btn.count() > 0 and await cat_btn.is_visible():
+                print(f"  [eBay] Selecting category card: '{(await cat_btn.inner_text()).strip()[:50]}'", flush=True)
+                await cat_btn.click()
+                await page.wait_for_timeout(2500)
+        except Exception as exc:
+            print(f"  [eBay Category selection note]: {exc}", flush=True)
+
+        # Step 3: Click "Continue without match"
+        cwm = page.locator("button:has-text('Continue without match'), a:has-text('Continue without match')").first
+        if await cwm.count() > 0:
+            for _ in range(10):
+                if await cwm.is_enabled():
+                    print("  [eBay] Clicking 'Continue without match'...", flush=True)
+                    await cwm.click()
+                    await page.wait_for_timeout(2000)
+                    break
+                await page.wait_for_timeout(500)
+
+        # Step 4: Condition selection modal
+        cond_val = "1000" if ("new" in condition_str and "like" not in condition_str) else "3000"
+        if "parts" in condition_str:
+            cond_val = "7000"
+
+        try:
+            cond_loc = page.locator(
+                f"button:has-text('Pre-owned'), button:has-text('Used'), input[name='condition'][value='{cond_val}'], input[name='condition']"
+            ).first
+            if await cond_loc.count() > 0:
+                print(f"  [eBay] Selecting condition element...", flush=True)
+                if (await cond_loc.get_attribute("type")) == "radio":
+                    await cond_loc.check(force=True)
+                else:
+                    await cond_loc.click()
+                await page.wait_for_timeout(1000)
+        except Exception as exc:
+            print(f"  [eBay Condition selection note]: {exc}", flush=True)
+
+        # Step 5: Click "Continue to listing" / "Continue"
+        cont_btn = page.locator("button.condition-dialog-radix__continue-btn, button:has-text('Continue to listing'), button:has-text('Continue')").first
+        if await cont_btn.count() > 0:
+            for _ in range(10):
+                if await cont_btn.is_enabled():
+                    print("  [eBay] Clicking 'Continue to listing' / 'Continue'...", flush=True)
+                    await cont_btn.click()
+                    await page.wait_for_timeout(3000)
+                    break
+                await page.wait_for_timeout(500)
+
+        # Step 6: Wait for listing editor SPA to mount
+        print("  [eBay] Waiting for listing editor SPA to mount...", flush=True)
+        await page.wait_for_selector("input#fehelix-uploader, input[type='file']", state="attached", timeout=35000)
+
+    # Editor SPA is now mounted! Wait 3s for React components to stabilize
+    await page.wait_for_timeout(3000)
+
+    # Extract draft ID from URL if present
+    curr_url = page.url
+    m = re.search(r"draft_?id=(\d+)", curr_url, re.IGNORECASE)
+    if m:
+        draft_id = m.group(1)
+        print(f"  [eBay] Current draft ID: {draft_id}", flush=True)
+
+    # 1. Update Title if present
     for title_sel in [
         "input[name='title']",
         "input[aria-label*='Item title']",
@@ -185,9 +234,12 @@ async def create_ebay_draft(
     ]:
         loc = page.locator(title_sel).first
         if await loc.count() > 0 and await loc.is_visible():
+            await loc.click()
             await loc.fill(title)
+            print(f"  [eBay] Title set: '{title}'", flush=True)
             break
 
+    # 2. Update Brand / MPN specifics if present
     for brand_sel in ["input[aria-label*='Brand']", "input[name*='Brand']"]:
         loc = page.locator(brand_sel).first
         if await loc.count() > 0 and await loc.is_visible():
@@ -200,23 +252,73 @@ async def create_ebay_draft(
             await loc.fill(model_mpn)
             break
 
-    # Description iframe or rich text editor
-    try:
-        desc_iframe = page.frame_locator("iframe[id*='desc'], iframe[title*='Description']").first
-        body_loc = desc_iframe.locator("body")
-        if await body_loc.count() > 0:
-            await body_loc.fill(description)
-    except Exception:
-        for desc_sel in [
-            "div[contenteditable='true'][aria-label*='description']",
-            "textarea[name*='description']",
-        ]:
-            loc = page.locator(desc_sel).first
-            if await loc.count() > 0 and await loc.is_visible():
-                await loc.fill(description)
-                break
+    # 3. Upload Original High-Resolution Raw Photos
+    if photos:
+        try:
+            file_input = page.locator("input#fehelix-uploader, input[type='file']").first
+            if await file_input.count() > 0:
+                # Check how many images are currently loaded
+                current_img_count = await page.locator(".se-uploader-module-image, img[src*='ebayimg']").count()
+                if current_img_count < len(photos):
+                    upload_set = photos[:24]
+                    print(f"  [eBay] Uploading {len(upload_set)} original high-resolution photo(s)...", flush=True)
+                    await file_input.set_input_files(upload_set)
+                    upload_wait = min(25, 4 + len(upload_set) * 1)
+                    await page.wait_for_timeout(upload_wait * 1000)
+                    print(f"  [eBay] Photos uploaded.", flush=True)
+                else:
+                    print(f"  [eBay] Photos already present on draft ({current_img_count} image(s)).", flush=True)
+        except Exception as exc:
+            print(f"  [eBay Photo upload note]: {exc}", flush=True)
 
-    # Price (Buy It Now)
+    # 4. Populate Description via Rich-Text Iframe Body & Fallback
+    desc_populated = False
+    try:
+        desc_frame = page.frame_locator("#se-rte-frame__summary, iframe[title='Description']").first
+        body_loc = desc_frame.locator("body")
+        if await body_loc.count() > 0:
+            await body_loc.click()
+            await page.wait_for_timeout(300)
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+            await page.wait_for_timeout(200)
+            await page.keyboard.insert_text(description)
+            await page.wait_for_timeout(500)
+            print(f"  [eBay] Populated description in rich-text iframe ({len(description)} chars).", flush=True)
+            desc_populated = True
+    except Exception as exc:
+        print(f"  [eBay Rich-text iframe note]: {exc}", flush=True)
+
+    if not desc_populated:
+        # Fallback to hidden raw textarea with DOM event dispatch
+        raw_ta = page.locator("textarea[name='description'], textarea[id*='rich-text-editor']").first
+        if await raw_ta.count() > 0:
+            try:
+                await raw_ta.evaluate(
+                    "(ta, val) => { ta.value = val; ta.dispatchEvent(new Event('input', {bubbles: true})); ta.dispatchEvent(new Event('change', {bubbles: true})); }",
+                    description,
+                )
+                print(f"  [eBay] Populated description via raw textarea fallback.", flush=True)
+            except Exception as exc:
+                print(f"  [eBay Raw textarea note]: {exc}", flush=True)
+
+    # 5. Populate Quantity Schema Field
+    try:
+        for qty_sel in [
+            "input[name='quantity']",
+            "input[id*='PRICE'][id*='textbox']",
+            "input[aria-label*='Quantity']",
+        ]:
+            qty_loc = page.locator(qty_sel).first
+            if await qty_loc.count() > 0 and await qty_loc.is_visible():
+                await qty_loc.click()
+                await qty_loc.fill(str(quantity))
+                print(f"  [eBay] Set quantity schema field to: {quantity}", flush=True)
+                break
+    except Exception as exc:
+        print(f"  [eBay Quantity field note]: {exc}", flush=True)
+
+    # 6. Populate Buy It Now Price
     for price_sel in [
         "input[name='price']",
         "input[aria-label*='Buy It Now price']",
@@ -224,10 +326,12 @@ async def create_ebay_draft(
     ]:
         loc = page.locator(price_sel).first
         if await loc.count() > 0 and await loc.is_visible():
+            await loc.click()
             await loc.fill(f"{price:.2f}")
+            print(f"  [eBay] Set Buy It Now price to: ${price:.2f}", flush=True)
             break
 
-    # Package weight & dimensions if visible
+    # 7. Package Weight & Dimensions
     shipping = item.get("shipping") or {}
     weight_lbs = int(float(shipping.get("actual_weight_lbs") or 1))
     dims = shipping.get("dimensions_in") or [12, 9, 4]
@@ -245,7 +349,7 @@ async def create_ebay_draft(
         except Exception:
             pass
 
-    # Step 6: Click "Save for later" / "Save as draft" — NEVER click "List it"
+    # Step 8: Click "Save for later" / "Save as draft" — NEVER click "List it"
     await safe_click_draft_button(
         page,
         selectors=[
@@ -255,8 +359,17 @@ async def create_ebay_draft(
         ],
         platform_name="eBay",
     )
-    await page.wait_for_timeout(2000)
-    return page.url
+    await page.wait_for_timeout(5000)
+
+    # Return canonical resume URL
+    if draft_id:
+        final_url = f"https://www.ebay.com/sl/list?mode=AddItem&draft_id={draft_id}"
+    else:
+        m2 = re.search(r"draft_?id=(\d+)", page.url, re.IGNORECASE)
+        final_url = f"https://www.ebay.com/sl/list?mode=AddItem&draft_id={m2.group(1)}" if m2 else page.url
+
+    print(f"  [eBay] Successfully saved and parked draft: {final_url}", flush=True)
+    return final_url
 
 
 async def create_fbmp_draft(
@@ -725,7 +838,14 @@ async def run_draft_pipeline(
                 or "aberdeen" in cl_url.lower()
             )
 
-            needs_ebay = run_ebay and (overwrite or not item.get("ebay_draft_url"))
+            ebay_url = item.get("ebay_draft_url") or ""
+            is_ebay_incomplete = (
+                not ebay_url
+                or "prelist" in ebay_url
+                or ("draft_id" not in ebay_url.lower() and "draftid" not in ebay_url.lower())
+            )
+
+            needs_ebay = run_ebay and (overwrite or is_ebay_incomplete)
             needs_fbmp = run_fbmp and (overwrite or not item.get("fbmp_listing_url"))
             needs_cl = run_cl and (overwrite or is_cl_incomplete)
 
