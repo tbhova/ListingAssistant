@@ -169,19 +169,25 @@ Only execute Stage 4 **after** the user explicitly approves the review queue fro
 
 ---
 
-## Stage 5: Google Sheets State & Cross-Post Tracker (`scripts/sync_sheets.py` & `scripts/teardown_sold.py`)
+## Stage 5: Google Sheets State, Reconciliation & Cross-Post Teardown (`scripts/sync_sheets.py`, `scripts/reconcile_listings.py` & `scripts/teardown_sold.py`)
 
 1. Immediately after Stage 4 (or anytime to checkpoint state), sync the batch to Google Sheets and the local CSV mirror:
    ```powershell
    .venv\Scripts\python.exe scripts/sync_sheets.py
    ```
    This updates the master Google Sheet (`SKU | Item Title | Routing Bucket | Est Net Profit | Status | eBay Draft/Item URL | FBMP Listing URL | Craigslist Edit URL | Local Folder Path`) and `items/master_inventory.csv`.
-2. **When an Item Sells (`teardown_sold.py`):**
-   When the user says an item sold (e.g., *"ITEM-01 sold on eBay, tear down the cross-posts"*), run:
+2. **Reconcile Published URLs (`reconcile_listings.py`):**
+   Periodically (or after manually publishing drafts), run:
    ```powershell
-   .venv\Scripts\python.exe scripts/teardown_sold.py <SKU>
+   .venv\Scripts\python.exe scripts/reconcile_listings.py
    ```
-   This reads the cross-posted URLs for `<SKU>`, opens/deletes the remaining active listings via Chrome CDP, and marks the SKU `SOLD` in Google Sheets.
+   This scans your live eBay Seller Hub, Facebook Marketplace Selling, and Craigslist Account Home via Chrome CDP (`9222`), replaces stale draft/create links with published `/itm/...` and Craigslist `/manage/...` URLs, updates `LIVE` statuses, and syncs `items/batch_manifest.json`, `items/master_inventory.csv`, and Google Sheets.
+3. **When an Item Sells (`teardown_sold.py`):**
+   When the user says an item sold (e.g., *"the Aeron chair sold"* or *"ITEM-01 sold on eBay"*), run:
+   ```powershell
+   .venv\Scripts\python.exe scripts/teardown_sold.py "<SKU_OR_TITLE>"
+   ```
+   This looks up the SKU by ID or title, checks Craigslist, Facebook Marketplace, and eBay Seller Hub via Chrome CDP, deletes/ends remaining active listings with post-reload verification, and marks the SKU `SOLD` in `items/batch_manifest.json`, `items/master_inventory.csv`, and Google Sheets.
 
 ---
 
