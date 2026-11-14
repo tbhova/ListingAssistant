@@ -47,9 +47,9 @@ Before finishing setup, **interview the user** (using your `ask_question` tool o
 2. **Craigslist URL & Subdomain (`CRAIGSLIST_SUBDOMAIN`):**
    - *Ask:* "When you visit Craigslist in your browser, what is the URL (e.g., `https://sfbay.craigslist.org` or `https://seattle.craigslist.org`)?"
    - *Agent Action:* Automatically extract the subdomain before `.craigslist.org` (e.g., `sfbay`, `seattle`, `losangeles`, `chicago`) and write it to `CRAIGSLIST_SUBDOMAIN`.
-3. **Craigslist Sub-Area & City/Neighborhood (`CRAIGSLIST_AREA` & `CRAIGSLIST_CITY`):**
-   - *Ask:* "When you click **'post to classifieds'** on your local Craigslist, does it ask you to pick a sub-area (like *'south bay area'*) and/or a specific city/neighborhood (like *'san jose west'*), or does it go straight to *'choose a type of posting'*?"
-   - *Agent Action:* Populate `CRAIGSLIST_AREA` and `CRAIGSLIST_CITY` (or leave them blank if their city doesn't use sub-areas).
+3. **Craigslist Sub-Area, District & City/Neighborhood (`CRAIGSLIST_AREA`, `CRAIGSLIST_CITY`, `CRAIGSLIST_NEIGHBORHOOD`):**
+   - *Ask:* "When you click **'post to classifieds'** on your local Craigslist, does it ask you to pick a sub-area (like *'south bay area'*) and/or a district (like *'san jose west'*), and what should we type into the **'city or neighborhood'** box on the listing form (e.g., *'San Jose Rose Garden'*)?"
+   - *Agent Action:* Populate `CRAIGSLIST_AREA`, `CRAIGSLIST_CITY`, and `CRAIGSLIST_NEIGHBORHOOD` (or leave them blank if their city doesn't use sub-areas).
 4. **Photo Slicing Time-Gap Threshold (`PHOTO_TIME_GAP_SECONDS`):**
    - *Ask:* "How many seconds do you usually pause between finishing photos of one item and starting the next? (Default is `60` seconds; sequential photos taken within this window are grouped into the same item folder)."
 5. **Profit & Routing Thresholds (`MIN_PROFIT_ALL_THREE`, `MIN_PROFIT_EBAY_ONLY`, `LOCAL_ONLY_MAX_WEIGHT_LBS`):**

@@ -735,6 +735,7 @@ async def create_craigslist_preview(
     post_code = CRAIGSLIST_SUBDOMAIN_TO_POST_CODE.get(subdomain.lower(), subdomain.lower())
     cl_area = os.getenv("CRAIGSLIST_AREA", "south bay area").strip()
     cl_city = os.getenv("CRAIGSLIST_CITY", "san jose west").strip()
+    cl_neighborhood = (os.getenv("CRAIGSLIST_NEIGHBORHOOD") or cl_city).strip()
     origin_zip = os.getenv("ORIGIN_ZIP", "95126").strip()
 
     title = str(item.get("title") or "")[:70]
@@ -891,7 +892,7 @@ async def create_craigslist_preview(
     try:
         city_inp = page.locator("input[name='city']:not([disabled]), input[name='GeographicArea']:not([disabled])").first
         if await city_inp.count() > 0 and await city_inp.is_visible() and await city_inp.is_enabled():
-            await city_inp.fill(cl_city)
+            await city_inp.fill(cl_neighborhood)
     except Exception:
         pass
 
