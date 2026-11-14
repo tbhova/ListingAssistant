@@ -252,7 +252,7 @@ def main() -> int:
     parser.add_argument("sku", type=str, help="The sold SKU (or item_XX ID) to tear down")
     parser.add_argument(
         "--sold-on",
-        choices=["ebay", "fbmp", "craigslist"],
+        choices=["ebay", "fbmp", "craigslist", "amazon"],
         default=None,
         help="Optional platform where the item sold (leaves that platform alone and tears down the others)",
     )

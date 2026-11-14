@@ -160,6 +160,114 @@ def calculate_zone8_shipping(
     }
 
 
+# ==============================================================================
+# 2026 Amazon FBA Fulfillment Fee Tiers (Standard-Size + 3.5% Fuel Surcharge)
+# ==============================================================================
+AMAZON_FBA_STD_TIERS: List[Tuple[float, float]] = [
+    (0.25, 3.30),   # Small Standard 4 oz
+    (0.50, 3.48),   # Small Standard 8 oz
+    (0.75, 3.66),   # Small Standard 12 oz
+    (1.00, 3.85),   # Small/Large Standard 16 oz
+    (1.50, 4.95),   # Large Standard 1.5 lb
+    (2.00, 5.45),   # Large Standard 2 lb
+    (3.00, 6.20),   # Large Standard 3 lb
+    (5.00, 7.15),   # Large Standard 5 lb
+    (10.00, 8.65),  # Large Standard 10 lb
+    (20.00, 11.50), # Large Standard 20 lb
+]
+
+
+def calculate_amazon_economics(
+    item_data: Dict[str, Any],
+    shipping_info: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Calculate Amazon FBA and Amazon FBM fees and net profit for items with an ASIN match
+    (or media/book items). Includes Individual plan $0.99 fee, 15% referral fee,
+    $1.80 media closing fee, 2026 FBA fulfillment + 3.5% surcharge, inbound placement,
+    inbound UPS box shipping, and estimated 2-month warehouse storage.
+    """
+    asin = str(item_data.get("amazon_asin") or "").strip()
+    is_new = "new" in str(item_data.get("condition") or "").lower() and "like" not in str(item_data.get("condition") or "").lower()
+    amz_used = item_data.get("amazon_used_price")
+    amz_new = item_data.get("amazon_new_price")
+
+    # Determine target Amazon selling price
+    if is_new and amz_new:
+        amz_price = float(amz_new)
+    elif amz_used:
+        amz_price = float(amz_used)
+    elif amz_new:
+        # Conservative Used discount off New Buy Box if Used price wasn't parsed
+        amz_price = round(float(amz_new) * 0.70, 2)
+    else:
+        amz_price = float(item_data.get("comp_price") or 0.0) if asin else 0.0
+
+    is_media = bool(item_data.get("amazon_is_media")) or any(
+        kw in str(item_data.get("category") or "").lower()
+        for kw in ("book", "media", "dvd", "cd", "music", "video game")
+    )
+
+    plan = os.getenv("AMAZON_PLAN", "individual").strip().lower()
+    plan_fee = 0.99 if plan == "individual" else 0.00
+    referral_pct = float(os.getenv("AMAZON_REFERRAL_PCT", "0.15"))
+    closing_fee = float(os.getenv("AMAZON_MEDIA_CLOSING_FEE", "1.80")) if is_media else 0.00
+    inbound_per_lb = float(os.getenv("AMAZON_FBA_INBOUND_PER_LB", "0.50"))
+    placement_fee = float(os.getenv("AMAZON_FBA_PLACEMENT_FEE", "0.35"))
+    storage_months = float(os.getenv("AMAZON_FBA_STORAGE_MONTHS", "2"))
+
+    weight_lbs = max(0.1, float(shipping_info.get("actual_weight_lbs") or 1.0))
+    cubic_in = float(shipping_info.get("cubic_inches") or 400.0)
+    cubic_ft = cubic_in / 1728.0
+
+    # FBA fulfillment fee (billable weight + 3.5% fuel surcharge; -$0.77 Low-Price FBA if < $10)
+    base_fba_fee = lookup_rate(weight_lbs, AMAZON_FBA_STD_TIERS, per_lb_over=0.45)
+    if 0 < amz_price < 10.0:
+        base_fba_fee = max(2.20, base_fba_fee - 0.77)
+    fba_fulfillment_fee = round(base_fba_fee * 1.035, 2)
+
+    inbound_shipping = round(weight_lbs * inbound_per_lb, 2)
+    est_storage = round(cubic_ft * 0.87 * storage_months, 2)
+
+    if amz_price > 0 and asin:
+        referral_fee = round(max(0.30, amz_price * referral_pct), 2)
+        total_fba_fees = round(
+            referral_fee + closing_fee + plan_fee + fba_fulfillment_fee + placement_fee + inbound_shipping + est_storage,
+            2,
+        )
+        fba_net = round(amz_price - total_fba_fees, 2)
+
+        zone8_ship = float(shipping_info.get("estimated_shipping_usd") or 0.0)
+        total_fbm_fees = round(referral_fee + closing_fee + plan_fee + zone8_ship, 2)
+        fbm_net = round(amz_price - total_fbm_fees, 2)
+    else:
+        referral_fee = 0.0
+        total_fba_fees = 0.0
+        fba_net = None
+        fbm_net = None
+
+    return {
+        "matched": bool(asin),
+        "asin": asin or None,
+        "amazon_url": item_data.get("amazon_url") or (f"https://www.amazon.com/dp/{asin}" if asin else None),
+        "is_media": is_media,
+        "amazon_is_seller": bool(item_data.get("amazon_is_seller")),
+        "bsr_rank": item_data.get("amazon_bsr_rank"),
+        "bsr_category": item_data.get("amazon_bsr_category"),
+        "target_price_usd": round(amz_price, 2) if amz_price > 0 else 0.0,
+        "referral_fee_usd": referral_fee,
+        "media_closing_fee_usd": closing_fee,
+        "plan_fee_usd": plan_fee,
+        "fba_fulfillment_fee_usd": fba_fulfillment_fee,
+        "inbound_placement_fee_usd": placement_fee,
+        "inbound_shipping_usd": inbound_shipping,
+        "est_storage_usd": est_storage,
+        "total_fba_fees_usd": total_fba_fees,
+        "fba_net_profit_usd": fba_net,
+        "fbm_net_profit_usd": fbm_net,
+    }
+
+
 def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     """
     Calculate eBay fees, Net Profit, Routing Bucket, FBMP buffered price,
@@ -220,11 +328,38 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
         or shipping_ratio > local_max_ship_ratio
     )
 
+    # Amazon FBA & FBM Economics
+    min_profit_fba = float(os.getenv("MIN_PROFIT_AMAZON_FBA", "5.00"))
+    min_profit_fbm = float(os.getenv("MIN_PROFIT_AMAZON_FBM", "10.00"))
+    amazon_econ = calculate_amazon_economics(item_data, shipping_info)
+    fba_net = amazon_econ.get("fba_net_profit_usd")
+    fbm_net = amazon_econ.get("fbm_net_profit_usd")
+
+    # Buy Box competition rule: Books/Media allow Used even if Amazon sells New;
+    # non-books skip FBA if Amazon itself is a seller on the listing.
+    # FBA standard-size eligibility checks physical size/weight (<=20 lbs, <=18" longest side)
+    # rather than USPS shipping ratio, since Amazon's fulfillment rates beat USPS on 1-5 lb books.
+    amz_blocks_buybox = amazon_econ["amazon_is_seller"] and not amazon_econ["is_media"]
+    is_fba_standard_size = weight_lbs <= 20.0 and max_side <= 18.0
+    fba_eligible = (
+        amazon_econ["matched"]
+        and not amz_blocks_buybox
+        and is_fba_standard_size
+        and fba_net is not None
+        and fba_net >= min_profit_fba
+    )
+
     # Assign Routing Bucket
     explicit_bucket = item_data.get("routing_bucket")
-    if explicit_bucket and explicit_bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_ONLY", "DONATE_OR_LOT"):
+    if explicit_bucket and explicit_bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_ONLY", "DONATE_OR_LOT", "AMAZON_FBA_STAGE"):
         routing_bucket = explicit_bucket
         routing_reason = f"Explicit override: {explicit_bucket}."
+    elif fba_eligible and (fba_net >= net_profit or net_profit < min_profit_ebay_only):
+        routing_bucket = "AMAZON_FBA_STAGE"
+        routing_reason = (
+            f"ASIN {amazon_econ['asin']} ({'Media' if amazon_econ['is_media'] else 'Standard'}) "
+            f"nets ${fba_net:.2f} via FBA (vs ${net_profit:.2f} on eBay); stage in FBA Bin."
+        )
     elif is_bulky_or_heavy and comp_price >= min_comp_local_only and net_profit < min_profit_all_three:
         routing_bucket = "LOCAL_ONLY"
         routing_reason = (
@@ -245,7 +380,7 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     elif net_profit >= min_profit_ebay_only:
         routing_bucket = "EBAY_ONLY"
         routing_reason = (
-            f"Shippable small/medium item with ${net_profit:.2f} net profit ($15-$49 range); "
+            f"Shippable small/medium item with ${net_profit:.2f} net profit; "
             f"not worth local pickup scheduling friction."
         )
     else:
@@ -254,6 +389,16 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
             f"eBay Net Profit (${net_profit:.2f}) is below ${min_profit_ebay_only:.2f} minimum threshold; "
             f"recommend bundling into a lot or donating."
         )
+
+    # Optional Amazon FBM cross-post flag (never combined with exclusive FBA staging)
+    cross_post_amazon_fbm = bool(
+        routing_bucket in ("ALL_THREE", "EBAY_ONLY")
+        and amazon_econ["matched"]
+        and not amz_blocks_buybox
+        and fbm_net is not None
+        and fbm_net >= min_profit_fbm
+        and fbm_net >= net_profit
+    )
 
     # Stage 3 Priority Score (0-100):
     # Priority = (Uncertainty_Score * 0.6) + (Normalized_Value_Score * 0.4)
@@ -276,6 +421,9 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
             "craigslist_list_price_usd": craigslist_list_price,
             "routing_bucket": routing_bucket,
             "routing_reason": routing_reason,
+            "amazon": amazon_econ,
+            "cross_post_amazon_fbm": cross_post_amazon_fbm,
+            "fba_bin": item_data.get("fba_bin") or ("FBA_BIN_01" if routing_bucket == "AMAZON_FBA_STAGE" else ""),
             "uncertainty_score": round(uncertainty_score, 1),
             "normalized_value_score": round(normalized_value_score, 1),
             "priority_score": priority_score,
@@ -294,6 +442,7 @@ def default_vision_template(item_id: str, sku: str, photos: List[str]) -> Dict[s
         "photos": photos,
         "brand": "TBD",
         "model_mpn": "TBD",
+        "isbn_upc": "",
         "title": f"Draft Item {item_id} - Populate Vision Metadata",
         "category": "General",
         "condition": "Used - Good",
@@ -503,10 +652,10 @@ def build_markdown_review_queue(manifest: Dict[str, Any]) -> str:
     lines.append("## 1. Master Priority Queue (Sorted Highest Priority -> Lowest)")
     lines.append("")
     lines.append(
-        "| Priority | SKU (`item_XX`) | Proposed Title | Cond. | Comp ($) | Zone 8 Ship ($) | eBay Fee ($) | **Est Net Profit** | Routing Bucket |"
+        "| Priority | SKU (`item_XX`) | Proposed Title | Cond. | Comp ($) | Zone 8 Ship ($) | eBay Net | **AMZ FBA Net** | ASIN | Routing Bucket |"
     )
     lines.append(
-        "| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: |"
+        "| :---: | :--- | :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: |"
     )
 
     for item in items:
@@ -516,11 +665,16 @@ def build_markdown_review_queue(manifest: Dict[str, Any]) -> str:
         cond = item.get("condition", "Used")
         comp = item.get("comp_price", 0.0)
         ship = item["shipping"]["estimated_shipping_usd"]
-        fees = item["ebay_fees_usd"]
         net = item["estimated_net_profit_usd"]
+        amz = item.get("amazon") or {}
+        fba_net = amz.get("fba_net_profit_usd")
+        fba_str = f"**${fba_net:.2f}**" if fba_net is not None else "—"
+        asin_str = f"`{amz['asin']}`" if amz.get("asin") else "—"
         bucket = f"`{item['routing_bucket']}`"
+        if item.get("cross_post_amazon_fbm"):
+            bucket += " + `AMZ_FBM`"
         lines.append(
-            f"| **{prio:.1f}** | {sku_label} | {title} | {cond} | ${comp:.2f} | ${ship:.2f} | ${fees:.2f} | **${net:.2f}** | {bucket} |"
+            f"| **{prio:.1f}** | {sku_label} | {title} | {cond} | ${comp:.2f} | ${ship:.2f} | ${net:.2f} | {fba_str} | {asin_str} | {bucket} |"
         )
 
     lines.append("")
@@ -596,6 +750,21 @@ def build_markdown_review_queue(manifest: Dict[str, Any]) -> str:
         lines.append("")
         for b in bundles:
             lines.append(f"- **{b['bundle_title']}**: {b['recommendation']}")
+        lines.append("")
+
+    fba_summary = manifest.get("fba_staging_summary") or {}
+    if fba_summary.get("item_count", 0) > 0:
+        lines.append("---")
+        lines.append("## 5. Amazon FBA Staging Bin Status")
+        lines.append("")
+        lines.append(
+            f"- **Current Batch FBA Items:** `{fba_summary['item_count']}` / `{fba_summary['target_items']}` items | "
+            f"**Weight:** `{fba_summary['total_weight_lbs']:.1f}` / `{fba_summary['target_weight_lbs']:.1f} lbs`"
+        )
+        if fba_summary.get("ready_to_ship"):
+            lines.append("- **STATUS:** **READY TO SHIP!** Your FBA Staging Bin meets the box threshold — create a *Send to Amazon* plan.")
+        else:
+            lines.append("- **STATUS:** Accumulate in your physical FBA Staging Bin until you reach 20 items or 25 lbs.")
         lines.append("")
 
     lines.append("---")
@@ -683,6 +852,11 @@ def calculate_all_items(items_dir: Path) -> Dict[str, Any]:
 
     bundles = generate_bundle_suggestions(sorted_items)
 
+    fba_items = [i for i in sorted_items if i["routing_bucket"] == "AMAZON_FBA_STAGE"]
+    fba_target_items = int(os.getenv("FBA_BIN_TARGET_ITEMS", "20"))
+    fba_target_lbs = float(os.getenv("FBA_BIN_TARGET_LBS", "25.0"))
+    fba_total_lbs = round(sum(float(i["shipping"]["actual_weight_lbs"]) for i in fba_items), 2)
+
     manifest = {
         "generated_at": datetime.now().isoformat(),
         "origin_zip": os.getenv("ORIGIN_ZIP", "95126"),
@@ -692,7 +866,14 @@ def calculate_all_items(items_dir: Path) -> Dict[str, Any]:
         "total_items": len(sorted_items),
         "bucket_counts": {
             bucket: sum(1 for i in sorted_items if i["routing_bucket"] == bucket)
-            for bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_ONLY", "DONATE_OR_LOT")
+            for bucket in ("ALL_THREE", "LOCAL_ONLY", "EBAY_ONLY", "AMAZON_FBA_STAGE", "DONATE_OR_LOT")
+        },
+        "fba_staging_summary": {
+            "item_count": len(fba_items),
+            "total_weight_lbs": fba_total_lbs,
+            "target_items": fba_target_items,
+            "target_weight_lbs": fba_target_lbs,
+            "ready_to_ship": len(fba_items) >= fba_target_items or fba_total_lbs >= fba_target_lbs,
         },
         "bundle_suggestions": bundles,
         "items": sorted_items,

@@ -84,6 +84,7 @@ def launch_dedicated_chrome(port: int, profile_dir: Path, open_login_tabs: bool 
                 "https://www.ebay.com/sh/ovw",
                 "https://www.facebook.com/marketplace/create/item",
                 "https://accounts.craigslist.org/login/home",
+                "https://sellercentral.amazon.com/product-search",
             ]
         )
 

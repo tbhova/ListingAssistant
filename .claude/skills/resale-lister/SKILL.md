@@ -28,6 +28,7 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
 - Configuration lives in `.env` at the workspace root (`ORIGIN_ZIP`, `CRAIGSLIST_SUBDOMAIN`, fee/profit thresholds, `CHROME_CDP_URL`, `GOOGLE_SHEET_ID`).
 - **Pre-Approved Safe Local Scripts:**
   - `scripts/group_photos.py`
+  - `scripts/match_amazon.py`
   - `scripts/analyze_items.py`
   - `scripts/sync_sheets.py`
 - **Human-Gated Browser Scripts (Require Explicit User Approval After Stage 3):**
@@ -81,7 +82,13 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
      - `description_detailed`: Rich, structured draft description for high-priority/high-value items.
      - `description_concise`: Clean, concise 2–3 sentence description for low-priority items.
    - *(Fallback mode: If the user prefers standalone API extraction and `GEMINI_API_KEY` is configured in `.env`, run `.venv\Scripts\python.exe scripts/analyze_items.py --use-api`).*
-3. **Run Shipping Math, Profit Calculation & Routing:**
+3. **Optional Amazon Product Page Matching (`scripts/match_amazon.py`):**
+   For books/media or barcode/model-identifiable items, run:
+   ```powershell
+   .venv\Scripts\python.exe scripts/match_amazon.py
+   ```
+   This looks up the Amazon `ASIN`, `BSR`, `Amazon Used/New Price`, and whether `Amazon.com` is a seller, saving them into `vision_input.json`.
+4. **Run Shipping Math, Profit Calculation & Routing:**
    ```powershell
    .venv\Scripts\python.exe scripts/analyze_items.py --calculate
    ```

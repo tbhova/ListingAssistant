@@ -4,9 +4,11 @@
       "Read",
       "Write",
       "Bash(python scripts/group_photos.py*)",
+      "Bash(python scripts/match_amazon.py*)",
       "Bash(python scripts/analyze_items.py*)",
       "Bash(python scripts/sync_sheets.py*)",
       "Bash(.venv/Scripts/python.exe scripts/group_photos.py*)",
+      "Bash(.venv/Scripts/python.exe scripts/match_amazon.py*)",
       "Bash(.venv/Scripts/python.exe scripts/analyze_items.py*)",
       "Bash(.venv/Scripts/python.exe scripts/sync_sheets.py*)"
     ],

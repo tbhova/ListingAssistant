@@ -46,6 +46,8 @@ FORBIDDEN_PUBLISH_TOKENS = {
     "list for free",
     "post now",
     "submit listing",
+    "save and finish",
+    "save & finish",
 }
 
 
@@ -993,6 +995,113 @@ async def create_craigslist_preview(
     return page.url
 
 
+async def create_amazon_draft(
+    context: Any,
+    item: Dict[str, Any],
+    fulfillment_channel: str = "FBA",
+    dry_run: bool = False,
+) -> Dict[str, str]:
+    """
+    Check Seller Central 'Add a Product' gating for item's ASIN, select Condition,
+    fill Price & Condition Note, select Fulfillment Channel (FBA or FBM w/ Quantity=0),
+    and park safely on the Offer screen without clicking 'Save and finish'.
+    """
+    amz = item.get("amazon") or {}
+    asin = str(amz.get("asin") or item.get("amazon_asin") or "").strip()
+    if not asin:
+        print("  [Amazon] No ASIN matched for this item; skipping Seller Central draft.", flush=True)
+        return {"status": "NO_ASIN", "url": ""}
+
+    target_price = float(amz.get("target_price_usd") or item.get("comp_price") or 15.0)
+    cond_raw = str(item.get("condition") or "Used - Good").lower()
+    if "new" in cond_raw and "like" not in cond_raw:
+        amz_cond = "New"
+    elif "like new" in cond_raw:
+        amz_cond = "Used - Like New"
+    elif "very good" in cond_raw:
+        amz_cond = "Used - Very Good"
+    elif "fair" in cond_raw or "acceptable" in cond_raw:
+        amz_cond = "Used - Acceptable"
+    else:
+        amz_cond = "Used - Good"
+
+    cond_note = str(item.get("condition_notes") or item.get("description_concise") or "")[:500]
+    sku = str(item.get("sku") or "")
+
+    print(
+        f"  [Amazon {fulfillment_channel}] Checking Seller Central gating for ASIN={asin} "
+        f"({amz_cond}, ${target_price:.2f})...",
+        flush=True,
+    )
+    if dry_run:
+        return {
+            "status": f"DRY_RUN_{fulfillment_channel}",
+            "url": f"https://sellercentral.amazon.com/product-search/search?q={asin}&dry_run=true",
+        }
+
+    page = await context.new_page()
+    search_url = f"https://sellercentral.amazon.com/product-search/search?q={asin}"
+    await page.goto(search_url, wait_until="domcontentloaded")
+    await page.wait_for_timeout(3000)
+
+    apply_btn = page.locator("button:has-text('Apply to sell'), a:has-text('Apply to sell')").first
+    not_avail = page.locator("text=/Not available|Listing limitations apply/i").first
+    sell_btn = page.locator("button:has-text('Sell this product'), a:has-text('Sell this product')").first
+
+    if await apply_btn.count() > 0 and await apply_btn.is_visible() and await sell_btn.count() == 0:
+        print(f"  [Amazon] ASIN {asin} is GATED ('Apply to sell' required). Skipping Amazon draft.", flush=True)
+        return {"status": "AMAZON_GATED", "url": page.url}
+
+    if await not_avail.count() > 0 and await not_avail.is_visible() and await sell_btn.count() == 0:
+        print(f"  [Amazon] ASIN {asin} has listing limitations. Skipping Amazon draft.", flush=True)
+        return {"status": "AMAZON_GATED", "url": page.url}
+
+    try:
+        cond_select = page.locator("select[aria-label*='condition'], select[name*='condition']").first
+        if await cond_select.count() > 0 and await cond_select.is_visible():
+            await cond_select.select_option(label=amz_cond)
+            await page.wait_for_timeout(800)
+    except Exception:
+        pass
+
+    if await sell_btn.count() > 0 and await sell_btn.is_visible():
+        await sell_btn.click()
+        await page.wait_for_timeout(2500)
+
+    offer_fields = [
+        ("input[name='item_sku'], input[id*='item_sku']", sku),
+        ("input[name='standard_price'], input[id*='standard_price']", f"{target_price:.2f}"),
+        ("textarea[name='condition_note'], textarea[id*='condition_note']", cond_note),
+    ]
+    if fulfillment_channel == "FBM":
+        offer_fields.append(("input[name='quantity'], input[id*='quantity']", "0"))
+
+    for sel, val in offer_fields:
+        if not val:
+            continue
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() > 0 and await loc.is_visible():
+                await loc.fill(val)
+        except Exception:
+            continue
+
+    try:
+        if fulfillment_channel == "FBA":
+            fba_radio = page.locator("label:has-text('Amazon will ship'), input[value='AMAZON_NA']").first
+            if await fba_radio.count() > 0 and await fba_radio.is_visible():
+                await fba_radio.click()
+        else:
+            fbm_radio = page.locator("label:has-text('I will ship'), input[value='DEFAULT']").first
+            if await fbm_radio.count() > 0 and await fbm_radio.is_visible():
+                await fbm_radio.click()
+    except Exception:
+        pass
+
+    print(f"  [Amazon {fulfillment_channel}] Parked on Offer tab (NOT published): {page.url}", flush=True)
+    return {"status": f"PARKED_{fulfillment_channel}", "url": page.url}
+
+
 async def run_draft_pipeline(
     manifest_path: Path,
     sku_filter: Optional[str] = None,
@@ -1054,6 +1163,8 @@ async def run_draft_pipeline(
                 or bool(item.get("fbmp_shipping_and_pickup"))
             ) and platform_filter in (None, "fbmp")
             run_cl = bucket in ("ALL_THREE", "LOCAL_ONLY") and platform_filter in (None, "craigslist")
+            run_amz_fba = bucket == "AMAZON_FBA_STAGE" and platform_filter in (None, "amazon")
+            run_amz_fbm = bool(item.get("cross_post_amazon_fbm")) and platform_filter in (None, "amazon")
 
             cl_url = item.get("craigslist_edit_url") or ""
             is_cl_incomplete = (
@@ -1079,8 +1190,9 @@ async def run_draft_pipeline(
             needs_ebay = run_ebay and (overwrite or is_ebay_incomplete)
             needs_fbmp = run_fbmp and (overwrite or not item.get("fbmp_listing_url"))
             needs_cl = run_cl and (overwrite or is_cl_incomplete)
+            needs_amz = (run_amz_fba or run_amz_fbm) and (overwrite or not item.get("amazon_offer_url"))
 
-            if not (needs_ebay or needs_fbmp or needs_cl) and not sku_filter:
+            if not (needs_ebay or needs_fbmp or needs_cl or needs_amz) and not sku_filter:
                 print(f"[SKIP] {sku} ({item.get('item_id')}) already has all required drafts created.", flush=True)
                 continue
 
@@ -1104,6 +1216,15 @@ async def run_draft_pipeline(
                     item["craigslist_edit_url"] = cl_url
                 except Exception as exc:
                     print(f"  [Craigslist ERROR] {exc}", flush=True)
+
+            if needs_amz:
+                try:
+                    channel = "FBA" if run_amz_fba else "FBM"
+                    amz_res = await create_amazon_draft(context, item, fulfillment_channel=channel, dry_run=dry_run)
+                    item["amazon_offer_url"] = amz_res.get("url", "")
+                    item["amazon_draft_status"] = amz_res.get("status", "")
+                except Exception as exc:
+                    print(f"  [Amazon ERROR] {exc}", flush=True)
 
             item["status"] = "DRAFTS_CREATED" if not dry_run else "DRY_RUN_VERIFIED"
             item["drafted_at"] = datetime.now().isoformat()
@@ -1145,7 +1266,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--platform",
-        choices=["ebay", "fbmp", "craigslist"],
+        choices=["ebay", "fbmp", "craigslist", "amazon"],
         default=None,
         help="Optional single platform filter",
     )

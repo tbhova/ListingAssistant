@@ -36,12 +36,18 @@ SHEET_HEADERS = [
     "FBMP Listing URL",
     "Craigslist Edit URL",
     "Local Folder Path",
+    "Amazon ASIN",
+    "AMZ FBA Net",
+    "FBA Bin",
 ]
 
 
 def item_to_row(item: Dict[str, Any]) -> List[str]:
-    """Convert a manifest item dictionary into the 9-column Google Sheet row."""
+    """Convert a manifest item dictionary into the 12-column Google Sheet row."""
     net_profit = float(item.get("estimated_net_profit_usd", 0.0))
+    amz = item.get("amazon") or {}
+    fba_net = amz.get("fba_net_profit_usd")
+    fba_net_str = f"${float(fba_net):.2f}" if fba_net is not None else ""
     return [
         str(item.get("sku") or ""),
         str(item.get("title") or ""),
@@ -52,6 +58,9 @@ def item_to_row(item: Dict[str, Any]) -> List[str]:
         str(item.get("fbmp_listing_url") or ""),
         str(item.get("craigslist_edit_url") or ""),
         str(item.get("folder_path") or ""),
+        str(amz.get("asin") or item.get("amazon_asin") or ""),
+        fba_net_str,
+        str(item.get("fba_bin") or ""),
     ]
 
 
@@ -132,7 +141,7 @@ def sync_google_sheet(rows: List[List[str]]) -> bool:
             ws.append_row(SHEET_HEADERS, value_input_option="USER_ENTERED")
             all_values = [SHEET_HEADERS]
         elif all_values[0] != SHEET_HEADERS:
-            ws.update(range_name="A1:I1", values=[SHEET_HEADERS])
+            ws.update(range_name="A1:L1", values=[SHEET_HEADERS])
 
         sku_to_row_idx: Dict[str, int] = {}
         for idx, existing_row in enumerate(all_values[1:], start=2):
@@ -146,7 +155,7 @@ def sync_google_sheet(rows: List[List[str]]) -> bool:
             if sku in sku_to_row_idx:
                 row_idx = sku_to_row_idx[sku]
                 ws.update(
-                    range_name=f"A{row_idx}:I{row_idx}",
+                    range_name=f"A{row_idx}:L{row_idx}",
                     values=[row],
                     value_input_option="USER_ENTERED",
                 )
@@ -193,6 +202,15 @@ def main() -> int:
 
     sync_local_csv(args.csv_mirror, rows)
     sync_google_sheet(rows)
+
+    fba_summary = manifest.get("fba_staging_summary") or {}
+    if fba_summary.get("item_count", 0) > 0:
+        print(
+            f"[FBA BIN] {fba_summary['item_count']} / {fba_summary['target_items']} items | "
+            f"{fba_summary['total_weight_lbs']} / {fba_summary['target_weight_lbs']} lbs"
+        )
+        if fba_summary.get("ready_to_ship"):
+            print("[FBA BIN ALERT] Staging bin reached box threshold! Ready to create a 'Send to Amazon' shipment.")
     return 0
 
 

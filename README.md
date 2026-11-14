@@ -104,10 +104,11 @@ ListingAssistant/
 ├── items/                               # Auto-generated item_XX/ folders, review_queue.md, and master_inventory.csv
 └── scripts/
     ├── group_photos.py                  # Stage 1: EXIF timestamp photo slicing & 1-2 photo outlier detection
-    ├── analyze_items.py                 # Stage 2 & 3: Vision inspection, Zone 8 shipping math, routing & Priority Queue
+    ├── match_amazon.py                  # Stage 2A: Amazon.com ASIN, BSR & competition matcher
+    ├── analyze_items.py                 # Stage 2B & 3: Vision inspection, Zone 8 & FBA/FBM math, routing & Priority Queue
     ├── launch_chrome.py                 # Helper: Launches dedicated Chrome profile on CDP port 9222
-    ├── create_drafts.py                 # Stage 4: Playwright CDP multi-platform draft generator (Hard Safety Guard)
-    ├── sync_sheets.py                   # Stage 5: Google Sheets + local CSV inventory sync
+    ├── create_drafts.py                 # Stage 4: Playwright CDP multi-platform draft generator (eBay, FBMP, CL, Amazon)
+    ├── sync_sheets.py                   # Stage 5: Google Sheets + FBA Staging Bin + local CSV inventory sync
     └── teardown_sold.py                 # Stage 5 Helper: Cross-post teardown when a SKU sells
 ```
 
