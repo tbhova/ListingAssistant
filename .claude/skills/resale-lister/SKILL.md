@@ -154,3 +154,19 @@ Only execute Stage 4 **after** the user explicitly approves the review queue fro
    .venv\Scripts\python.exe scripts/teardown_sold.py <SKU>
    ```
    This reads the cross-posted URLs for `<SKU>`, opens/deletes the remaining active listings via Chrome CDP, and marks the SKU `SOLD` in Google Sheets.
+
+---
+
+## Optional Workflow: Audit Active eBay Listings for Amazon FBA / FBM (`scripts/audit_ebay_for_amazon.py`)
+
+When the user asks to scan their **existing active eBay listings** to find Amazon matches, cross-post via FBM, or assemble an **FBA Box** (especially for lower-dollar items where individual shipping isn't worth the time):
+1. Ensure Chrome CDP (`9222`) is open and logged into eBay Seller Hub:
+   ```powershell
+   .venv\Scripts\python.exe scripts/launch_chrome.py --check-or-launch
+   ```
+2. Run the audit script:
+   ```powershell
+   .venv\Scripts\python.exe scripts/audit_ebay_for_amazon.py
+   ```
+3. Inspect `items/ebay_to_amazon_audit.md` and present the **Proposed FBA Box Summary**, **`MOVE_TO_FBA_BOX`** table, and **`CROSS_POST_FBM`** table to the user.
+4. **Halt for Approval:** Wait for the user to confirm which SKUs to move into the FBA box (and unlist from eBay) or cross-post via FBM before running Seller Central / eBay actions.
