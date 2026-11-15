@@ -35,6 +35,7 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
   - `scripts/launch_chrome.py`
   - `scripts/create_drafts.py`
   - `scripts/teardown_sold.py`
+  - `scripts/ship_pirateship.py`
 
 ---
 
@@ -204,3 +205,20 @@ When the user asks to scan their **existing active eBay listings** to find Amazo
    ```
 3. Inspect `items/ebay_to_amazon_audit.md` and present the **Proposed FBA Box Summary**, **`MOVE_TO_FBA_BOX`** table, and **`CROSS_POST_FBM`** table to the user.
 4. **Halt for Approval:** Wait for the user to confirm which SKUs to move into the FBA box (and unlist from eBay) or cross-post via FBM before running Seller Central / eBay actions.
+
+---
+
+## Optional Workflow: Own-Label Sold Order -> Pirate Ship (`scripts/ship_pirateship.py`)
+
+When the user says an own-label / FBMP item sold and needs a shipping label:
+1. **Check for Missing Box Specs:** If the user did not include exact boxed **weight (`lbs`/`oz`)** and **dimensions (`L x W x H` in inches)**, **ask them first** before running the script. Also confirm if the item is a **Book** (strict rule: **only pass `--is-book` / Media Mail for books**).
+2. Run `scripts/ship_pirateship.py`:
+   ```powershell
+   .venv\Scripts\python.exe scripts/ship_pirateship.py --item "<Title>" --lbs <LBS> --oz <OZ> --length <L> --width <W> --height <H> [--is-book]
+   ```
+   - Extracts the buyer's address from FBMP `View Order`, fills Pirate Ship, and stops on the **Get Rates** screen (never auto-buys).
+   - If Pirate Ship asks for login (exit code 2), pause and ask the user to log in once in the open Chrome tab.
+3. **Carrier Preference & Purchase Gate:**
+   - The user prefers **USPS** because of free pickup.
+   - If a non-USPS service (e.g., UPS) is cheaper than USPS, present **both prices** to the user and ask which they prefer before purchasing.
+   - **Never buy a label** without explicit confirmation.
