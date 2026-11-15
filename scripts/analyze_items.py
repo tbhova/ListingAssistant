@@ -160,6 +160,58 @@ def calculate_zone8_shipping(
     }
 
 
+def calculate_fbmp_shipping_rate(
+    weight_lbs: float,
+    dimensions_in: List[float],
+    item_price: float,
+) -> Dict[str, Any]:
+    """
+    Calculate flat-rate FBMP shipping for 'Use your own shipping label':
+      1. Take billable weight (max of actual and USPS dim weight) and bump UP 1 USPS
+         Ground Advantage cliff/tier (0.25 -> 0.50 -> 0.75 -> 1.00 -> 2.00 -> 3.00...)
+         to avoid unexpected USPS tier-cliff overages.
+      2. Factor in Facebook's 10% selling fee (min $0.80) applied to (Item Price + Shipping)
+         so net payout after FB fees & shipping matches the base local pickup price.
+    """
+    dims = sorted([max(1.0, float(d)) for d in (dimensions_in or [10.0, 8.0, 6.0])], reverse=True)
+    length, width, height = dims[0], dims[1], dims[2]
+    cubic_in = length * width * height
+    usps_dim_weight = math.ceil(cubic_in / 166.0) if cubic_in > 1728.0 else float(weight_lbs)
+    base_billable = max(0.1, float(weight_lbs), usps_dim_weight)
+
+    # Find current cliff index in USPS_GROUND_ADVANTAGE_ZONE8_TABLE and bump +1 tier
+    tier_idx = len(USPS_GROUND_ADVANTAGE_ZONE8_TABLE) - 1
+    for i, (max_w, _) in enumerate(USPS_GROUND_ADVANTAGE_ZONE8_TABLE):
+        if base_billable <= max_w:
+            tier_idx = min(i + 1, len(USPS_GROUND_ADVANTAGE_ZONE8_TABLE) - 1)
+            break
+
+    bumped_weight_lbs, bumped_usps_cost = USPS_GROUND_ADVANTAGE_ZONE8_TABLE[tier_idx]
+    if base_billable > USPS_GROUND_ADVANTAGE_ZONE8_TABLE[-1][0]:
+        bumped_weight_lbs = math.ceil(base_billable) + 1.0
+        bumped_usps_cost = lookup_rate(bumped_weight_lbs, USPS_GROUND_ADVANTAGE_ZONE8_TABLE)
+
+    if length > 30.0:
+        bumped_usps_cost += 15.00
+    elif length > 22.0:
+        bumped_usps_cost += 4.00
+    if cubic_in > 3456.0:
+        bumped_usps_cost += 18.00
+
+    fb_fee_pct = float(os.getenv("FBMP_FEE_PERCENT", "0.10"))
+    # Solve: rate - max(0.80, fb_fee_pct * (item_price + rate)) - bumped_usps_cost >= 0
+    raw_rate = (bumped_usps_cost + (fb_fee_pct * item_price)) / max(0.01, (1.0 - fb_fee_pct))
+    if fb_fee_pct * (item_price + raw_rate) < 0.80:
+        raw_rate = bumped_usps_cost + 0.80
+    fbmp_shipping_rate = float(math.ceil(raw_rate))
+
+    return {
+        "fbmp_bumped_weight_lbs": round(bumped_weight_lbs, 2),
+        "fbmp_bumped_zone8_ship_usd": round(bumped_usps_cost, 2),
+        "fbmp_shipping_rate_usd": fbmp_shipping_rate,
+    }
+
+
 # ==============================================================================
 # 2026 Amazon FBA Fulfillment Fee Tiers (Standard-Size + 3.5% Fuel Surcharge)
 # ==============================================================================
@@ -319,6 +371,7 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     raw_fbmp_price = comp_price * (1.0 + fbmp_buffer)
     fbmp_list_price = float(round(raw_fbmp_price)) if raw_fbmp_price < 50 else float(round(raw_fbmp_price / 5.0) * 5)
     craigslist_list_price = float(round(comp_price))
+    fbmp_ship_info = calculate_fbmp_shipping_rate(weight_lbs, dims, fbmp_list_price)
 
     # Determine if item is heavy/bulky or shipping kills margin
     shipping_ratio = (est_shipping / comp_price) if comp_price > 0 else 1.0
@@ -418,6 +471,9 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
             "ebay_free_shipping": ebay_free_shipping,
             "ebay_list_price_usd": ebay_list_price,
             "fbmp_list_price_usd": fbmp_list_price,
+            "fbmp_bumped_weight_lbs": fbmp_ship_info["fbmp_bumped_weight_lbs"],
+            "fbmp_bumped_zone8_ship_usd": fbmp_ship_info["fbmp_bumped_zone8_ship_usd"],
+            "fbmp_shipping_rate_usd": fbmp_ship_info["fbmp_shipping_rate_usd"],
             "craigslist_list_price_usd": craigslist_list_price,
             "routing_bucket": routing_bucket,
             "routing_reason": routing_reason,

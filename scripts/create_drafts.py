@@ -563,45 +563,85 @@ async def create_fbmp_draft(
                     await page.wait_for_timeout(3000)
                     print(f"  [FBMP] Advanced to delivery step: {page.url}")
 
-                    # Select shipping label (Package weight + Shipping carrier)
-                    lbl_btn = page.locator("[role='main'] [role='button']:has-text('Select shipping label')").first
+                    # Select shipping label (Try "Own shipping label" + flat rate first;
+                    # fall back to "Prepaid shipping label" with bumped USPS cliff weight)
+                    lbl_btn = page.locator(
+                        "[role='main'] [role='button']:has-text('Select shipping label'), "
+                        "[role='main'] [role='button']:has-text('Prepaid label'), "
+                        "[role='main'] [role='button']:has-text('Own shipping')"
+                    ).first
                     if await lbl_btn.count() > 0 and await lbl_btn.is_visible():
                         await lbl_btn.click()
                         await page.wait_for_timeout(1500)
                         dlg = page.locator("[role='dialog']").last
                         weight_lbs = float(
-                            (item.get("shipping") or {}).get("actual_weight_lbs")
+                            item.get("fbmp_bumped_weight_lbs")
+                            or (item.get("shipping") or {}).get("actual_weight_lbs")
                             or item.get("weight_lbs")
                             or 1.0
                         )
-                        tier_label = _fbmp_weight_tier(weight_lbs)
-                        pw = dlg.locator("label:has-text('Package weight')").first
-                        if await pw.count() > 0:
-                            await pw.click()
-                            await page.wait_for_timeout(1000)
-                            pw_opt = page.locator(
-                                f"[role='option']:has-text('{tier_label}'), "
-                                f"[role='menuitem']:has-text('{tier_label}'), "
-                                f"span:text-is('{tier_label}')"
-                            ).first
-                            if await pw_opt.count() > 0 and await pw_opt.is_visible():
-                                await pw_opt.click()
-                                await page.wait_for_timeout(800)
-                                print(f"  [FBMP] Selected package weight: {tier_label}")
+                        flat_ship_rate = float(
+                            item.get("fbmp_shipping_rate_usd")
+                            or (item.get("shipping") or {}).get("estimated_shipping_usd")
+                            or 10.0
+                        )
 
-                        sc = dlg.locator("label:has-text('Shipping carrier')").first
-                        if await sc.count() > 0:
-                            await sc.click()
+                        used_own_label = False
+                        ship_opt = dlg.locator("label:has-text('Shipping option')").first
+                        if await ship_opt.count() > 0:
+                            await ship_opt.click()
                             await page.wait_for_timeout(1000)
-                            sc_opt = page.locator(
-                                "[role='option']:has-text('USPS'), [role='menuitem']:has-text('USPS'), "
-                                "[role='option'], [role='menuitem']"
+                            own_opt = page.locator(
+                                "[role='option']:has-text('own'), "
+                                "[role='menuitem']:has-text('own'), "
+                                "[role='option']:not(:has-text('Prepaid')), "
+                                "[role='menuitem']:not(:has-text('Prepaid'))"
                             ).first
-                            if await sc_opt.count() > 0 and await sc_opt.is_visible():
-                                carrier_txt = (await sc_opt.inner_text() or "").strip().replace("\n", " ")
-                                await sc_opt.click()
-                                await page.wait_for_timeout(800)
-                                print(f"  [FBMP] Selected shipping carrier: {carrier_txt}")
+                            if await own_opt.count() > 0 and await own_opt.is_visible():
+                                opt_txt = (await own_opt.inner_text() or "").strip()
+                                if "prepaid" not in opt_txt.lower():
+                                    await own_opt.click()
+                                    await page.wait_for_timeout(1000)
+                                    used_own_label = True
+                                    print(f"  [FBMP] Selected Own Shipping Label: {opt_txt}")
+                                    rate_inp = dlg.locator("label:has-text('Shipping rate') input, input[aria-label*='Shipping rate']").first
+                                    if await rate_inp.count() > 0 and await rate_inp.is_visible():
+                                        await rate_inp.fill(f"{flat_ship_rate:.2f}")
+                                        print(f"  [FBMP] Entered flat shipping rate: ${flat_ship_rate:.2f}")
+                            if not used_own_label:
+                                # Close dropdown by pressing Escape so modal remains interactive
+                                await page.keyboard.press("Escape")
+                                await page.wait_for_timeout(500)
+
+                        if not used_own_label:
+                            tier_label = _fbmp_weight_tier(weight_lbs)
+                            pw = dlg.locator("label:has-text('Package weight')").first
+                            if await pw.count() > 0:
+                                await pw.click()
+                                await page.wait_for_timeout(1000)
+                                pw_opt = page.locator(
+                                    f"[role='option']:has-text('{tier_label}'), "
+                                    f"[role='menuitem']:has-text('{tier_label}'), "
+                                    f"span:text-is('{tier_label}')"
+                                ).first
+                                if await pw_opt.count() > 0 and await pw_opt.is_visible():
+                                    await pw_opt.click()
+                                    await page.wait_for_timeout(800)
+                                    print(f"  [FBMP] Selected bumped prepaid package weight: {tier_label}")
+
+                            sc = dlg.locator("label:has-text('Shipping carrier')").first
+                            if await sc.count() > 0:
+                                await sc.click()
+                                await page.wait_for_timeout(1000)
+                                sc_opt = page.locator(
+                                    "[role='option']:has-text('USPS'), [role='menuitem']:has-text('USPS'), "
+                                    "[role='option'], [role='menuitem']"
+                                ).first
+                                if await sc_opt.count() > 0 and await sc_opt.is_visible():
+                                    carrier_txt = (await sc_opt.inner_text() or "").strip().replace("\n", " ")
+                                    await sc_opt.click()
+                                    await page.wait_for_timeout(800)
+                                    print(f"  [FBMP] Selected shipping carrier: {carrier_txt}")
 
                         upd_btn = dlg.locator("div[aria-label='Update'], div[role='button']:has-text('Update')").first
                         if await upd_btn.count() > 0 and await upd_btn.is_visible():
