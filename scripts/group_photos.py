@@ -426,6 +426,18 @@ def slice_raw_photos(
         existing_processed.add(photo_path.name)
     processed_log.write_text(json.dumps(sorted(existing_processed), indent=2), encoding="utf-8")
 
+    # Mirror Google Drive's Processed/ workflow locally: move staged raw photos into raw_photos/processed/
+    local_processed_dir = raw_dir / "processed"
+    local_processed_dir.mkdir(parents=True, exist_ok=True)
+    for photo_path in raw_photos:
+        try:
+            dest_proc = local_processed_dir / photo_path.name
+            if dest_proc.exists():
+                dest_proc = local_processed_dir / f"{photo_path.stem}_{datetime.now().strftime('%H%M%S')}{photo_path.suffix}"
+            shutil.move(str(photo_path), str(dest_proc))
+        except Exception:
+            pass
+
     report = build_grouping_report(
         items_dir=items_dir,
         threshold_seconds=threshold_seconds,
@@ -456,6 +468,60 @@ def slice_raw_photos(
             print(f"    To merge: {outlier['merge_command']}")
 
     return report
+
+
+def pull_drive_photos(raw_dir: Path) -> int:
+    """
+    Wrapper that pulls new photos from Google Drive (`GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID`)
+    into `raw_photos/` and moves them to `GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID` in Drive
+    so both Drive and local `raw_photos/` funnel into one unified pipeline.
+    """
+    import subprocess
+
+    drop_id = os.getenv("GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID", "").strip()
+    proc_id = os.getenv("GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID", "").strip()
+    if not drop_id:
+        print("[INFO] GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID not set in .env; skipping Drive pull.")
+        return 0
+
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        res = subprocess.run(
+            ["gdrive", "readonly", "ls", drop_id, "--json"],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        entries = json.loads(res.stdout or "[]")
+    except FileNotFoundError:
+        print("[INFO] `gdrive` CLI not on PATH in this shell; run `gdrive readonly download` from agent shell if needed.")
+        return 0
+    except Exception as exc:
+        print(f"[WARN] Could not list Google Drive drop folder: {exc}")
+        return 0
+
+    pulled = 0
+    for item in entries:
+        name = str(item.get("name") or "")
+        file_id = str(item.get("id") or "")
+        mime = str(item.get("mimeType") or "")
+        if not file_id or mime == "application/vnd.google-apps.folder":
+            continue
+        if Path(name).suffix.lower() not in SUPPORTED_EXTENSIONS:
+            continue
+
+        out_path = raw_dir / name
+        print(f"[DRIVE] Pulling '{name}' -> '{out_path.as_posix()}'...")
+        dl = subprocess.run(["gdrive", "readonly", "download", file_id, "--out", str(out_path)], capture_output=True, text=True)
+        if dl.returncode == 0:
+            pulled += 1
+            if proc_id:
+                subprocess.run(["gdrive", "mutate", "mv", file_id, proc_id], capture_output=True, text=True)
+        else:
+            print(f"  [WARN] Failed to download {name}: {dl.stderr.strip()}")
+
+    print(f"[DRIVE] Pulled {pulled} new photo(s) into '{raw_dir.as_posix()}'.")
+    return pulled
 
 
 def main() -> int:
@@ -497,8 +563,16 @@ def main() -> int:
         metavar=("SOURCE_ITEM", "TARGET_ITEM"),
         help="Merge SOURCE_ITEM (e.g. item_03) into TARGET_ITEM (e.g. item_02) and re-index",
     )
+    parser.add_argument(
+        "--pull-drive",
+        action="store_true",
+        help="Pull new photos from Google Drive Photo Drop folder into raw_photos/ before slicing",
+    )
 
     args = parser.parse_args()
+
+    if args.pull_drive:
+        pull_drive_photos(args.raw_dir)
 
     if args.merge:
         source_item, target_item = args.merge
