@@ -14,11 +14,12 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 try:
     from dotenv import load_dotenv
@@ -281,6 +282,52 @@ def merge_item_folders(
     return report
 
 
+def _collect_existing_state(items_dir: Path) -> Tuple[Set[str], int]:
+    """Return lowercased original filenames already staged/manifested/ignored and max item_XX index."""
+    known: Set[str] = set()
+    max_idx = 0
+
+    def _add_staged_name(name: str) -> None:
+        base = Path(name).name.lower()
+        known.add(base)
+        stripped = re.sub(r"^\d+_", "", base)
+        known.add(stripped)
+
+    processed_log = items_dir / ".processed_raw_photos.json"
+    if processed_log.exists():
+        try:
+            for name in json.loads(processed_log.read_text(encoding="utf-8-sig")):
+                _add_staged_name(str(name))
+        except Exception:
+            pass
+
+    manifest_path = items_dir / "batch_manifest.json"
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            for item in manifest.get("items", []):
+                m = re.match(r"item_(\d+)$", str(item.get("item_id", "")))
+                if m:
+                    max_idx = max(max_idx, int(m.group(1)))
+                for p in item.get("photos", []):
+                    _add_staged_name(str(p))
+        except Exception:
+            pass
+
+    if items_dir.exists():
+        for child in items_dir.iterdir():
+            if not child.is_dir():
+                continue
+            m = re.match(r"item_(\d+)$", child.name)
+            if m:
+                max_idx = max(max_idx, int(m.group(1)))
+            for f in child.iterdir():
+                if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS:
+                    _add_staged_name(f.name)
+
+    return known, max_idx
+
+
 def slice_raw_photos(
     raw_dir: Path,
     items_dir: Path,
@@ -304,14 +351,25 @@ def slice_raw_photos(
         report = build_grouping_report(items_dir, threshold_seconds, outlier_max_photos)
         return report
 
+    start_idx = 1
     if clean:
         for child in items_dir.iterdir():
             if child.is_dir() and child.name.startswith("item_"):
                 shutil.rmtree(child, ignore_errors=True)
             elif child.is_file() and child.name != ".gitkeep":
                 child.unlink(missing_ok=True)
+    else:
+        known_filenames, max_idx = _collect_existing_state(items_dir)
+        skipped = [p for p in raw_photos if p.name.lower() in known_filenames]
+        raw_photos = [p for p in raw_photos if p.name.lower() not in known_filenames]
+        start_idx = max_idx + 1
+        if skipped:
+            print(f"[INFO] Skipping {len(skipped)} already-staged photo(s) in '{raw_dir.as_posix()}'.")
+        if not raw_photos:
+            print("[INFO] No new unprocessed photos to stage.")
+            return build_grouping_report(items_dir, threshold_seconds, outlier_max_photos)
 
-    # Extract timestamps for all photos
+    # Extract timestamps for all new photos
     extracted: List[Tuple[Path, datetime, str]] = []
     for photo_path in raw_photos:
         dt, source = extract_photo_timestamp(photo_path)
@@ -338,14 +396,9 @@ def slice_raw_photos(
     if current_group:
         groups.append(current_group)
 
-    # Clear existing item_XX folders before restaging
-    for child in items_dir.iterdir():
-        if child.is_dir() and child.name.startswith("item_"):
-            shutil.rmtree(child, ignore_errors=True)
-
     photo_metadata_map: Dict[str, Dict[str, Any]] = {}
 
-    for idx, grp in enumerate(groups, start=1):
+    for idx, grp in enumerate(groups, start=start_idx):
         folder_name = f"item_{idx:02d}"
         folder_path = items_dir / folder_name
         folder_path.mkdir(parents=True, exist_ok=True)
@@ -361,6 +414,17 @@ def slice_raw_photos(
                 "source": source,
                 "gap_from_prev_seconds": gap_sec,
             }
+
+    processed_log = items_dir / ".processed_raw_photos.json"
+    existing_processed: Set[str] = set()
+    if processed_log.exists() and not clean:
+        try:
+            existing_processed = {str(x) for x in json.loads(processed_log.read_text(encoding="utf-8"))}
+        except Exception:
+            pass
+    for photo_path in raw_photos:
+        existing_processed.add(photo_path.name)
+    processed_log.write_text(json.dumps(sorted(existing_processed), indent=2), encoding="utf-8")
 
     report = build_grouping_report(
         items_dir=items_dir,
