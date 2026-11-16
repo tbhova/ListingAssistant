@@ -214,7 +214,10 @@ async def revise_fbmp_listing(
 ) -> Dict[str, Any]:
     """Find an FBMP draft or active listing via exact title and update fields in-place."""
     title = str(item.get("title") or "")[:80]
-    fb_price = int(round(float(item.get("fbmp_list_price_usd") or item.get("comp_price") or 25.0)))
+    fb_price_raw = item.get("fbmp_list_price_usd")
+    if fb_price_raw is None:
+        fb_price_raw = item.get("comp_price")
+    fb_price = int(round(float(fb_price_raw if fb_price_raw is not None else 25.0)))
     description = str(item.get("description_detailed") or item.get("description_concise") or title)
     listing_id = str(item.get("fbmp_listing_id") or "").strip()
 
@@ -341,7 +344,10 @@ async def revise_craigslist_listing(
         print(f"  [CL Revise] Skipping {item.get('item_id')}: no craigslist_edit_url.")
         return {}
 
-    cl_price = int(round(float(item.get("craigslist_list_price_usd") or item.get("comp_price") or 25.0)))
+    cl_price_raw = item.get("craigslist_list_price_usd")
+    if cl_price_raw is None:
+        cl_price_raw = item.get("comp_price")
+    cl_price = int(round(float(cl_price_raw if cl_price_raw is not None else 25.0)))
     title = str(item.get("title") or "")[:70]
     description = str(item.get("description_detailed") or item.get("description_concise") or title)
 

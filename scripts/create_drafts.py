@@ -455,7 +455,10 @@ async def create_fbmp_draft(
     advances to Delivery step for shipping+pickup items, and clicks 'Save draft'.
     """
     title = str(item.get("title") or "")[:80]
-    fb_price = int(round(float(item.get("fbmp_list_price_usd") or item.get("comp_price") or 25.0)))
+    fb_price_raw = item.get("fbmp_list_price_usd")
+    if fb_price_raw is None:
+        fb_price_raw = item.get("comp_price")
+    fb_price = int(round(float(fb_price_raw if fb_price_raw is not None else 25.0)))
     description = str(
         item.get("description_detailed") or item.get("description_concise") or title
     )
@@ -779,7 +782,10 @@ async def create_craigslist_preview(
     origin_zip = os.getenv("ORIGIN_ZIP", "95126").strip()
 
     title = str(item.get("title") or "")[:70]
-    cl_price = int(round(float(item.get("craigslist_list_price_usd") or item.get("comp_price") or 25.0)))
+    cl_price_raw = item.get("craigslist_list_price_usd")
+    if cl_price_raw is None:
+        cl_price_raw = item.get("comp_price")
+    cl_price = int(round(float(cl_price_raw if cl_price_raw is not None else 25.0)))
     description = str(
         item.get("description_detailed") or item.get("description_concise") or title
     )
@@ -890,7 +896,10 @@ async def create_craigslist_preview(
     # Step 4: Category selection (?s=cat)
     try:
         if "?s=cat" in page.url or "choose category" in (await page.title()).lower():
-            target_cat = match_craigslist_category(item.get("category", ""), title)
+            if "craigslist_list_price_usd" in item and float(item.get("craigslist_list_price_usd") or 0) <= 0:
+                target_cat = "free stuff"
+            else:
+                target_cat = match_craigslist_category(item.get("category", ""), title)
             print(f"  [Craigslist] Matched category '{target_cat}'", flush=True)
             cat_loc = page.locator(f"label:has-text('{target_cat}')").first
             if await cat_loc.count() > 0:
