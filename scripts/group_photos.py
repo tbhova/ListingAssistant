@@ -365,6 +365,13 @@ def slice_raw_photos(
         start_idx = max_idx + 1
         if skipped:
             print(f"[INFO] Skipping {len(skipped)} already-staged photo(s) in '{raw_dir.as_posix()}'.")
+            local_processed_dir = raw_dir / "processed"
+            local_processed_dir.mkdir(parents=True, exist_ok=True)
+            for sp in skipped:
+                try:
+                    shutil.move(str(sp), str(local_processed_dir / sp.name))
+                except Exception:
+                    pass
         if not raw_photos:
             print("[INFO] No new unprocessed photos to stage.")
             return build_grouping_report(items_dir, threshold_seconds, outlier_max_photos)
