@@ -328,7 +328,7 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     origin_zip = os.getenv("ORIGIN_ZIP", "98101")
     ebay_fee_pct = float(os.getenv("EBAY_FEE_PERCENT", "0.135"))
     ebay_fixed_fee = float(os.getenv("EBAY_FIXED_FEE", "0.40"))
-    fbmp_buffer = float(os.getenv("FBMP_NEGOTIATION_BUFFER", "0.12"))
+    fbmp_buffer = float(os.getenv("FBMP_NEGOTIATION_BUFFER", "0.00"))
 
     min_profit_all_three = float(os.getenv("MIN_PROFIT_ALL_THREE", "50.0"))
     min_profit_ebay_only = float(os.getenv("MIN_PROFIT_EBAY_ONLY", "15.0"))
@@ -367,10 +367,13 @@ def compute_economics_and_routing(item_data: Dict[str, Any]) -> Dict[str, Any]:
     ebay_fees = round((landed_ebay_revenue * ebay_fee_pct) + ebay_fixed_fee, 2) if landed_ebay_revenue > 0 else 0.0
     net_profit = round(landed_ebay_revenue - est_shipping - ebay_fees, 2)
 
-    # Local pickup pricing: FBMP includes +10-15% negotiation buffer; Craigslist uses target price
-    raw_fbmp_price = comp_price * (1.0 + fbmp_buffer)
-    fbmp_list_price = float(round(raw_fbmp_price)) if raw_fbmp_price < 50 else float(round(raw_fbmp_price / 5.0) * 5)
+    # Local pickup pricing: match FBMP and Craigslist by default (buffer=0.00)
     craigslist_list_price = float(round(comp_price))
+    if fbmp_buffer == 0.0:
+        fbmp_list_price = craigslist_list_price
+    else:
+        raw_fbmp_price = comp_price * (1.0 + fbmp_buffer)
+        fbmp_list_price = float(round(raw_fbmp_price)) if raw_fbmp_price < 50 else float(round(raw_fbmp_price / 5.0) * 5)
     fbmp_ship_info = calculate_fbmp_shipping_rate(weight_lbs, dims, fbmp_list_price)
 
     # Determine if item is heavy/bulky or shipping kills margin
