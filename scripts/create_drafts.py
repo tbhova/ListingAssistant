@@ -462,7 +462,8 @@ async def create_fbmp_draft(
     description = str(
         item.get("description_detailed") or item.get("description_concise") or title
     )
-    origin_zip = os.getenv("ORIGIN_ZIP", "98101")
+    origin_zip = os.getenv("ORIGIN_ZIP", "95126").strip()
+    fbmp_location = os.getenv("FBMP_LOCATION", "San Jose, CA 95126" if origin_zip == "95126" else origin_zip).strip()
     photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
     wants_shipping = bool(item.get("fbmp_shipping_and_pickup")) or item.get("routing_bucket") in ("EBAY_ONLY", "EBAY_AND_FBMP")
     fb_category = _map_fbmp_category(item, prefer_shipping=wants_shipping)
@@ -544,13 +545,18 @@ async def create_fbmp_draft(
     except Exception as exc:
         print(f"  [FBMP] Condition selection note: {exc}")
 
-    # Fill Location if visible on Step 1
+    # Fill Location if visible on Step 1 and pick the autocomplete suggestion
     for sel in ("label:has-text('Location') input", "input[aria-label='Location']"):
         try:
             loc = page.locator(sel).first
             if await loc.count() > 0 and await loc.is_visible():
-                await loc.fill(origin_zip)
-                await page.wait_for_timeout(400)
+                await loc.click()
+                await loc.fill(fbmp_location)
+                await page.wait_for_timeout(1200)
+                loc_opt = page.locator("[role='option']:has-text('San Jose'), [role='option']:has-text('95126'), [role='option']").first
+                if await loc_opt.count() > 0 and await loc_opt.is_visible():
+                    await loc_opt.click()
+                    await page.wait_for_timeout(400)
                 break
         except Exception:
             continue
