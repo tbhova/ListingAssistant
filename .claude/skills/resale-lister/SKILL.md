@@ -40,6 +40,13 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
 
 ## Stage 1: Photo Slicing & Visual Audit (`scripts/group_photos.py`)
 
+0. **Optional Google Drive Photo Pull (If User Shared/Uploaded Photos to Drive):**
+   - If the user says they uploaded/shared photos to Google Drive (or if `raw_photos/` is empty and `GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID` is set in `.env`):
+     1. List files in the drop folder: `gdrive readonly ls <GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID> --json`
+     2. For each image file (`.jpg`, `.jpeg`, `.png`, `.webp`, `.heic`), download it at full original resolution into `raw_photos/<name>`:
+        `gdrive readonly download <FILE_ID> --out raw_photos/<NAME>`
+     3. Move each downloaded file in Drive to `<GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID>` so the drop folder stays clean for the next batch:
+        `gdrive mutate mv <FILE_ID> <GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID>`
 1. Run the photo grouping script:
    ```powershell
    .venv\Scripts\python.exe scripts/group_photos.py
