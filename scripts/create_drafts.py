@@ -744,7 +744,8 @@ def match_craigslist_category(category_hint: str, title: str) -> str:
         (r"\b(saw|miter|drill|router|planer|caliper|press|lathe|wrench|socket)\b", "tools"),
         (r"\b(chair|desk|couch|sofa|table|hall tree|cabinet|dresser)\b", "furniture"),
         (r"\b(nintendo|switch|playstation|xbox|cockpit|wheelbase|pedals)\b", "video gaming"),
-        (r"\b(boots|shoes|jacket|helmet|gloves|riding)\b", "clothing & accessories"),
+        (r"\b(boots|shoes|oxford|sneaker|sneakers|jacket|helmet|gloves|riding)\b", "clothing & accessories"),
+        (r"\b(air cleaner|filter|media)\b", "household items"),
         (r"\b(laptop|desktop|monitor|pc|macbook)\b", "computers"),
         (r"\b(stereo|speaker|amplifier|receiver)\b", "electronics"),
     ]
@@ -753,6 +754,38 @@ def match_craigslist_category(category_hint: str, title: str) -> str:
             return cl_cat
 
     return "general for sale"
+
+
+CL_CATEGORY_VALUES: Dict[str, str] = {
+    "antiques": "150",
+    "appliances": "149",
+    "arts & crafts": "135",
+    "auto parts": "122",
+    "auto wheels & tires": "203",
+    "baby & kid stuff": "107",
+    "bicycle parts": "197",
+    "bicycles": "68",
+    "books & magazines": "92",
+    "clothing & accessories": "94",
+    "collectibles": "95",
+    "computer parts": "199",
+    "computers": "7",
+    "electronics": "96",
+    "farm & garden": "133",
+    "free stuff": "101",
+    "furniture": "141",
+    "general for sale": "5",
+    "health and beauty": "152",
+    "household items": "97",
+    "jewelry": "120",
+    "materials": "136",
+    "musical instruments": "98",
+    "photo/video": "137",
+    "sporting goods": "93",
+    "tools": "118",
+    "toys & games": "132",
+    "video gaming": "151",
+}
 
 
 def map_craigslist_condition(condition_str: str) -> str:
@@ -906,16 +939,17 @@ async def create_craigslist_preview(
                 target_cat = "free stuff"
             else:
                 target_cat = match_craigslist_category(item.get("category", ""), title)
-            print(f"  [Craigslist] Matched category '{target_cat}'", flush=True)
-            cat_loc = page.locator(f"label:has-text('{target_cat}')").first
-            if await cat_loc.count() > 0:
-                await cat_loc.click()
+            cat_val = CL_CATEGORY_VALUES.get(target_cat, "5")
+            print(f"  [Craigslist] Matched category '{target_cat}' (value={cat_val})", flush=True)
+            radio_loc = page.locator(f"input[type='radio'][value='{cat_val}']").first
+            if await radio_loc.count() > 0:
+                await radio_loc.check(force=True)
             else:
-                gen_loc = page.locator("label:has-text('general for sale')").first
+                gen_loc = page.locator("input[type='radio'][value='5']").first
                 if await gen_loc.count() > 0:
-                    await gen_loc.click()
+                    await gen_loc.check(force=True)
                 else:
-                    await page.locator("input[type='radio']").first.click()
+                    await page.locator("input[type='radio']").first.check(force=True)
             await page.locator("button[type='submit'], button:has-text('continue')").first.click()
             await page.wait_for_timeout(1500)
     except Exception as exc:
@@ -1100,9 +1134,9 @@ async def create_amazon_draft(
     await page.goto(search_url, wait_until="domcontentloaded")
     await page.wait_for_timeout(3000)
 
-    apply_btn = page.locator("button:has-text('Apply to sell'), a:has-text('Apply to sell')").first
+    apply_btn = page.locator("kat-button:has-text('Apply to sell'), button:has-text('Apply to sell'), a:has-text('Apply to sell')").first
     not_avail = page.locator("text=/Not available|Listing limitations apply/i").first
-    sell_btn = page.locator("button:has-text('Sell this product'), a:has-text('Sell this product')").first
+    sell_btn = page.locator("kat-button[data-testid='sell-this-product'], button:has-text('Sell this product'), a:has-text('Sell this product')").first
 
     if await apply_btn.count() > 0 and await apply_btn.is_visible() and await sell_btn.count() == 0:
         print(f"  [Amazon] ASIN {asin} is GATED ('Apply to sell' required). Skipping Amazon draft.", flush=True)
@@ -1112,17 +1146,41 @@ async def create_amazon_draft(
         print(f"  [Amazon] ASIN {asin} has listing limitations. Skipping Amazon draft.", flush=True)
         return {"status": "AMAZON_GATED", "url": page.url}
 
-    try:
-        cond_select = page.locator("select[aria-label*='condition'], select[name*='condition']").first
-        if await cond_select.count() > 0 and await cond_select.is_visible():
-            await cond_select.select_option(label=amz_cond)
-            await page.wait_for_timeout(800)
-    except Exception:
-        pass
+    # Select condition in Seller Central kat-dropdown (uses 'New' / 'Used') or legacy <select>
+    search_cond = "New" if amz_cond == "New" else "Used"
+    kat_dd = page.locator("kat-dropdown[data-testid='conditions-dropdown']").first
+    if await kat_dd.count() > 0 and await kat_dd.is_visible():
+        await kat_dd.click()
+        await page.wait_for_timeout(800)
+        opt = kat_dd.locator(f"kat-option:has-text('{amz_cond}'), kat-option:has-text('{search_cond}')").first
+        if await opt.count() == 0:
+            print(f"  [Amazon] Condition '{search_cond}' is not available for ASIN {asin}.", flush=True)
+            return {"status": "CONDITION_UNAVAILABLE", "url": page.url}
+        await opt.click()
+        await page.wait_for_timeout(1200)
+    else:
+        try:
+            cond_select = page.locator("select[aria-label*='condition'], select[name*='condition']").first
+            if await cond_select.count() > 0 and await cond_select.is_visible():
+                await cond_select.select_option(label=amz_cond)
+                await page.wait_for_timeout(800)
+        except Exception:
+            pass
+
+    if await apply_btn.count() > 0 and await apply_btn.is_visible():
+        print(f"  [Amazon] ASIN {asin} is GATED ('Apply to sell' required). Skipping Amazon draft.", flush=True)
+        return {"status": "AMAZON_GATED", "url": page.url}
 
     if await sell_btn.count() > 0 and await sell_btn.is_visible():
+        is_disabled = await sell_btn.get_attribute("disabled")
+        if is_disabled is not None:
+            print(f"  [Amazon] 'Sell this product' remained disabled for ASIN {asin} ({search_cond}).", flush=True)
+            return {"status": "AMAZON_GATED", "url": page.url}
         await sell_btn.click()
-        await page.wait_for_timeout(2500)
+        await page.wait_for_timeout(4000)
+    else:
+        print(f"  [Amazon] 'Sell this product' not available for ASIN {asin} ({search_cond}).", flush=True)
+        return {"status": "AMAZON_GATED", "url": page.url}
 
     offer_fields = [
         ("input[name='item_sku'], input[id*='item_sku']", sku),
