@@ -42,11 +42,15 @@ This skill orchestrates the 5-stage Resale Listing Pipeline in this workspace. F
 ## Stage 1: Photo Slicing, Orientation & Visual Discontinuity Audit (`scripts/group_photos.py`)
 
 0. **Unified Funnel (Google Drive Drop -> `raw_photos/` -> `raw_photos/processed/`):**
-   - If the user uploaded photos to Google Drive (`ListingAssistant_Photo_Drop`), run Stage 1 with `--pull-drive` (or download via `gdrive readonly ls` / `gdrive readonly download` into `raw_photos/` and `gdrive mutate mv` to `GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID`):
+   - If the user uploaded photos to Google Drive (`GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID` in `.env`), list them once with:
      ```powershell
-     .venv\Scripts\python.exe scripts/group_photos.py --pull-drive
+     gdrive readonly ls <GOOGLE_DRIVE_PHOTO_DROP_FOLDER_ID>
      ```
-   - `group_photos.py` automatically skips any already-processed photos (via `items/.processed_raw_photos.json` + `batch_manifest.json`), continues `item_XX` numbering incrementally, and moves staged raw photos into `raw_photos/processed/`.
+   - **Bulk Download Rule:** Always download all new photos in **one single chained command that starts with `gdrive`** (never wrap `gdrive` inside a PowerShell `$files = ...; foreach ...` loop, which drops `GCLI_ACCESS_TOKEN` injection, and never fire 10+ parallel `gdrive` calls, which triggers Drive API burst rate limits):
+     ```powershell
+     gdrive readonly download <ID_1> --out raw_photos/<NAME_1>; gdrive readonly download <ID_2> --out raw_photos/<NAME_2>
+     ```
+   - Then run `.venv\Scripts\python.exe scripts/group_photos.py` (which skips any already-processed photos via `items/.processed_raw_photos.json` + `batch_manifest.json` and stages new items incrementally at `item_XX+`). Only run `gdrive mutate mv <FILE_ID> <GOOGLE_DRIVE_PHOTO_PROCESSED_FOLDER_ID>` if the user asks to move the Drive files.
 1. Or, for local photos already in `raw_photos/`, run:
    ```powershell
    .venv\Scripts\python.exe scripts/group_photos.py
