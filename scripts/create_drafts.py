@@ -71,6 +71,10 @@ async def safe_click_draft_button(page: Any, selectors: List[str], platform_name
         try:
             locator = page.locator(sel).first
             if await locator.count() > 0 and await locator.is_visible():
+                aria_disabled = (await locator.get_attribute("aria-disabled") or "").strip().lower()
+                if aria_disabled == "true" or not await locator.is_enabled():
+                    print(f"  [{platform_name}] Skipping disabled draft button: '{sel}'")
+                    return False
                 text_content = (await locator.inner_text() or "").strip()
                 aria_label = (await locator.get_attribute("aria-label") or "").strip()
                 assert_safe_action_label(text_content)
@@ -666,8 +670,9 @@ async def create_fbmp_draft(
 
     # Click "Save draft" with exponential backoff on FBMP "Something went wrong" rate-limit modal
     backoff_delays = [10, 25, 60]
+    leave_open = False
     for attempt in range(len(backoff_delays) + 1):
-        await safe_click_draft_button(
+        clicked = await safe_click_draft_button(
             page,
             selectors=[
                 "div[aria-label='Save draft']",
@@ -677,6 +682,10 @@ async def create_fbmp_draft(
             ],
             platform_name="FBMP",
         )
+        if not clicked:
+            print("  [FBMP] Save draft button is disabled or unavailable; leaving tab open for manual review.", flush=True)
+            leave_open = True
+            break
         await page.wait_for_timeout(4500)
         err_dlg = page.locator("[role='dialog']:has-text('Something went wrong')").first
         if await err_dlg.count() > 0 and await err_dlg.is_visible():
@@ -689,11 +698,13 @@ async def create_fbmp_draft(
                 print(f"  [FBMP] 'Something went wrong' modal detected; backing off {wait_s}s (attempt {attempt + 1}/{len(backoff_delays)})...", flush=True)
                 await page.wait_for_timeout(wait_s * 1000)
                 continue
-            print("  [FBMP] Warning: 'Something went wrong' persisted after retries.", flush=True)
+            print("  [FBMP] Warning: 'Something went wrong' persisted after retries; leaving tab open.", flush=True)
+            leave_open = True
         break
 
     final_url = page.url
-    await page.close()
+    if not leave_open:
+        await page.close()
     return final_url
 
 

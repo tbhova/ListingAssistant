@@ -316,12 +316,18 @@ async def revise_fbmp_listing(
         for _ in range(3):
             upd = page.locator("div[aria-label='Update'], div[role='button']:has-text('Update'), button:has-text('Update')").first
             if await upd.count() > 0 and await upd.is_visible():
+                if (await upd.get_attribute("aria-disabled") or "").lower() == "true" or not await upd.is_enabled():
+                    print("  [FBMP Revise] Update button is disabled; skipping click.", flush=True)
+                    break
                 await upd.click()
                 await page.wait_for_timeout(3500)
                 print(f"  [FBMP Revise] Clicked 'Update' -> {page.url}", flush=True)
                 break
             nxt = page.locator("div[aria-label='Next'], div[role='button']:has-text('Next')").first
             if await nxt.count() > 0 and await nxt.is_visible():
+                if (await nxt.get_attribute("aria-disabled") or "").lower() == "true" or not await nxt.is_enabled():
+                    print("  [FBMP Revise] Next button is disabled; skipping click.", flush=True)
+                    break
                 await nxt.click()
                 await page.wait_for_timeout(2500)
             else:

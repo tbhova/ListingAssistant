@@ -173,7 +173,7 @@ Only execute Stage 4 **after** the user explicitly approves the review queue fro
    - Always uploads original, full-resolution raw camera images (never thumbnails or downscaled assets).
 3. **Hard Safety Rule:** `scripts/create_drafts.py` is hard-coded to **NEVER** click final `"Publish"`, `"List Item"`, or `"List It"` buttons:
    - **eBay:** Uploads photos, fills title, item specifics, description, price, and shipping, and clicks **"Save for later" / "Save as draft"**.
-   - **FB Marketplace:** Uploads photos, fills title, buffered local price (+10–15%), condition, description, and location, and clicks **"Save draft"**.
+   - **FB Marketplace:** Uploads photos, fills title, buffered local price (+10–15%), condition, description, and location, and clicks **"Save draft"**. **Never click disabled FBMP buttons** (`aria-disabled="true"` or `is_disabled()`): if `Save draft`, `Next`, or `Update` is disabled, skip clicking and leave the tab open for review instead of triggering `"Something went wrong"`.
    - **Craigslist:** Fills local posting flow, uploads original high-res images, and parks on the final **"Preview" / "Draft"** tab (`https://post.craigslist.org/k/.../preview`) without publishing.
 4. **Revising Existing Drafts or Live Listings (`scripts/manage_listings.py`):**
    Use `.venv\Scripts\python.exe scripts/manage_listings.py --sku <SKUs> --platform ebay|fbmp|craigslist|all --fields price,shipping` (supports `price,shipping,title,quantity,description,photos`) to update existing drafts (`Save for later` / `Save draft`) or already-published live listings (`Revise it` / `Update` / `publish`) **in-place** without creating duplicate drafts.
