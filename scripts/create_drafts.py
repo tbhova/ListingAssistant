@@ -110,7 +110,8 @@ async def create_ebay_draft(
     brand = str(item.get("brand") or "Unbranded")
     model_mpn = str(item.get("model_mpn") or "Does Not Apply")
     condition_str = str(item.get("condition") or "Used - Good").lower()
-    photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
+    raw_fbmp_photos = item.get("fbmp_photos") or item.get("photos", [])
+    photos = [str(Path(p).resolve()) for p in raw_fbmp_photos if Path(p).exists()][:10]
 
     print(f"  [eBay] Preparing draft for '{title}' (${price:.2f}, qty: {quantity}, {len(photos)} photo(s))...", flush=True)
     if dry_run:
@@ -470,7 +471,8 @@ async def create_fbmp_draft(
     )
     origin_zip = os.getenv("ORIGIN_ZIP", "95126").strip()
     fbmp_location = os.getenv("FBMP_LOCATION", "San Jose, CA 95126" if origin_zip == "95126" else origin_zip).strip()
-    photos = [str(Path(p).resolve()) for p in item.get("photos", []) if Path(p).exists()]
+    raw_fbmp_photos = item.get("fbmp_photos") or item.get("photos", [])
+    photos = [str(Path(p).resolve()) for p in raw_fbmp_photos if Path(p).exists()][:10]
     wants_shipping = bool(item.get("fbmp_shipping_and_pickup")) or item.get("routing_bucket") in ("EBAY_ONLY", "EBAY_AND_FBMP")
     fb_category = _map_fbmp_category(item, prefer_shipping=wants_shipping)
     fb_condition = _map_fbmp_condition(str(item.get("condition") or ""))
