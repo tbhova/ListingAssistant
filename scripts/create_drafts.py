@@ -491,8 +491,8 @@ async def create_fbmp_draft(
         try:
             file_input = page.locator("input[type='file'][accept*='image']").first
             if await file_input.count() > 0:
-                await file_input.set_input_files(photos[:20], timeout=90000)
-                print(f"  [FBMP] Uploaded {len(photos[:20])} photo(s).")
+                await file_input.set_input_files(photos[:10], timeout=90000)
+                print(f"  [FBMP] Uploaded {len(photos[:10])} photo(s).")
                 await page.wait_for_timeout(3000)
         except Exception as exc:
             print(f"  [FBMP] Photo upload note: {exc}")
