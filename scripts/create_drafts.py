@@ -398,7 +398,9 @@ async def create_ebay_draft(
 def _map_fbmp_category(item: Dict[str, Any], prefer_shipping: bool = False) -> str:
     """Map item metadata to a Facebook Marketplace category (preferring shipping-eligible ones)."""
     text = f"{item.get('category', '')} {item.get('title', '')}".lower()
-    if any(k in text for k in ("auto", "ford", "powersports", "helmet", "visor", "brake", "motor", "battery", "f-150", "car")):
+    if any(k in text for k in ("pet supplies", "dog supplies", "dog ", "ifetch", "ball launcher")):
+        return "Pet supplies"
+    if any(k in text for k in ("auto parts", "automotive", "ford", "powersports", "helmet", "visor", "brake", "f-150")) or re.search(r"\b(auto|motor|battery|car)\b", text):
         return "Auto parts"
     if any(k in text for k in ("tool", "saw", "pump", "mityvac", "bleeder", "drill", "wrench", "truing")):
         return "Tools"
